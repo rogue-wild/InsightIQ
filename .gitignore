@@ -10,7 +10,7 @@ infra/librechat/.env
 apps/engine/.env
 apps/engine/bin/
 .cursor/
-LibreChat/
+/LibreChat/
 data/*.csv
 data/*.parquet
 !data/samples/
