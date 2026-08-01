@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.DS_Store
+.env
+*.log
+apps/web/dist/
+apps/api/node_modules/
+apps/web/node_modules/
+infra/librechat/.env
+apps/engine/.env
+apps/engine/bin/
+.cursor/
+LibreChat/
+data/*.csv
+data/*.parquet
+!data/samples/
