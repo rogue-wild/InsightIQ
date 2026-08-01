@@ -772,7 +772,6 @@ func buildDiagnosisFromInsightIQ(
 		}
 		text += ". Top segments: " + strings.Join(parts, "; ") + "."
 	} else if len(observations) > 0 {
-		// Fallback when snapshot segments are empty but CH observations exist.
 		limit := 3
 		if len(observations) < limit {
 			limit = len(observations)
@@ -797,7 +796,6 @@ func buildDiagnosisFromInsightIQ(
 
 func shortenObservationDetail(detail string) string {
 	d := strings.TrimSpace(detail)
-	// Strip verbose "Dimension value \"x\" went from..." boilerplate when possible.
 	if strings.Contains(d, `Dimension value "`) {
 		re := strings.NewReplacer(`Dimension value "`, "", `" went from`, ":", " (delta:", " Δ", ", contribution:", " ·")
 		d = re.Replace(d)
