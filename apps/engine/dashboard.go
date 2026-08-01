@@ -70,8 +70,7 @@ func dashboardMeta() map[string]any {
 }
 
 func queryDataRange(ctx context.Context, conn *chClient) (map[string]any, error) {
-	// Prefer agg_hourly (physical SummingMergeTree) over metric_hourly_snapshot (VIEW).
-	// Full-scan min/max/count on the view was timing out once the demo load landed (~9M rows).
+	// Prefer agg_hourly (physical table) over metric_hourly_snapshot (VIEW) for bounds.
 	rows, err := conn.QueryMaps(ctx, `
 		SELECT
 			min(bucket) AS min_bucket,

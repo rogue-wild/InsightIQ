@@ -56,7 +56,7 @@ export default function InvestigationPage() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${data.id}-unseen-export.json`
+      a.download = `${data.id}-export.json`
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {
@@ -92,7 +92,7 @@ export default function InvestigationPage() {
         </Link>
         <div className="inv-nav-actions">
           <button type="button" className="btn" onClick={onExport} disabled={exporting}>
-            {exporting ? 'Exporting…' : 'Export unseen bundle'}
+            {exporting ? 'Exporting…' : 'Export evidence'}
           </button>
           <AskInChatButton
             alertId={alert.id}

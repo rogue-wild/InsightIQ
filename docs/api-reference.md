@@ -1,13 +1,13 @@
 # API reference
 
-Base URLs (local):
+Local bases:
 
 - Engine: `http://127.0.0.1:4100`
-- API: `http://127.0.0.1:4000` (proxies engine + adds chat / narration)
+- API: `http://127.0.0.1:4000`
 
 ---
 
-## Engine (`apps/engine`)
+## Engine
 
 ### `GET /health`
 
@@ -17,26 +17,21 @@ Base URLs (local):
 
 ### `GET /alerts?granularity=day|hour`
 
-Default: **`day`**.
+Default: `day`.
 
-- `day` — one card per advertiser (+ day), using the peak hourly anomaly that day; windows expanded to full UTC day; `baselineKind: daily_peak_hour`
+- `day` — peak hourly anomaly per advertiser per UTC day
 - `hour` — native hourly buckets from `alerts_live`
-
-Returns an array of alert cards (id, metric, pctChange, window, severity, summary, categories, …).
 
 ### `POST /investigate`
 
-Body (either):
-
 ```json
-{ "alertId": "<uuid-from-alerts_live>" }
+{ "alertId": "<uuid>" }
 ```
 
-or window fields for custom investigate:
+Or window fields:
 
 ```json
 {
-  "alertId": "optional",
   "metric": "revenue",
   "windowStart": "2026-06-21T10:00:00Z",
   "windowEnd": "2026-06-21T10:59:59Z",
@@ -44,19 +39,17 @@ or window fields for custom investigate:
 }
 ```
 
-Response: full investigation JSON (see [contracts](../packages/contracts/investigation.schema.json)).
-
 ### `GET /investigations/:id`
 
 Cached investigation or rebuild (`inv-<alertUuid>`).
 
 ### `GET /investigations/:id/export`
 
-Unseen-incident bundle: diagnosis, trace, evidence hash, seasonality, waterfall, counterfactual, hypotheses.
+Evidence bundle: diagnosis, trace, evidence hash, seasonality, waterfall, counterfactual, hypotheses.
 
 ### `GET /dashboard/meta`
 
-Metrics + dimensions catalog + `dataRange` `{ min, max, buckets }` (from `agg_hourly`).
+Metrics, dimensions, and `dataRange` `{ min, max, buckets }`.
 
 ### `POST /dashboard/query`
 
@@ -75,40 +68,34 @@ Metrics + dimensions catalog + `dataRange` `{ min, max, buckets }` (from `agg_ho
 
 ### `GET /dashboard/filters?dimension=&start=&end=`
 
-Distinct dimension values for filter pickers.
+Distinct values for filter pickers.
 
 ---
 
-## Node API (`apps/api`)
+## Node API
 
 ### `GET /health`
 
-Includes `engineUrl`, nested engine health, `gemini`, `langfuse`.
+Includes nested engine health, `gemini`, `langfuse`.
 
-### Alerts / investigations / dashboard
+| Method | Path |
+|--------|------|
+| GET | `/api/alerts?granularity=day\|hour` |
+| GET | `/api/alerts/:alertId` |
+| GET | `/api/alerts/:alertId/investigation` |
+| GET | `/api/investigations/:id` |
+| GET | `/api/investigations/:id/export` |
+| POST | `/api/investigate` |
+| GET | `/api/dashboard/meta` |
+| POST | `/api/dashboard/query` |
+| GET | `/api/dashboard/filters` |
 
-| Method | Path | Notes |
-|--------|------|--------|
-| GET | `/api/alerts?granularity=day\|hour` | Proxies engine |
-| GET | `/api/alerts/:alertId` | From list for that granularity |
-| GET | `/api/alerts/:alertId/investigation` | Investigate-by-alert |
-| GET | `/api/investigations/:id` | |
-| GET | `/api/investigations/:id/export` | |
-| POST | `/api/investigate` | |
-| GET | `/api/dashboard/meta` | |
-| POST | `/api/dashboard/query` | |
-| GET | `/api/dashboard/filters` | |
-
-**Live-only:** empty engine results return `[]` / `404` / `502` — no mock sample fallbacks.
-
-### Chat (OpenAI-compatible)
-
-#### `POST /v1/chat/completions`
+### `POST /v1/chat/completions`
 
 ```json
 {
   "model": "insightiq-rca",
-  "messages": [{ "role": "user", "content": "Revenue for India iOS 17.2 on 21 June 2026?" }],
+  "messages": [{ "role": "user", "content": "…" }],
   "stream": false,
   "investigationId": "optional",
   "alertId": "optional",
@@ -116,34 +103,23 @@ Includes `engineUrl`, nested engine health, `gemini`, `langfuse`.
 }
 ```
 
-Behavior:
-
-1. **Dashboard intent** — if the question mentions geo / OS / format / etc., run a dashboard query  
-   - Dates: ISO (`2026-06-21`) or natural (`21 June 2026`, `June 21, 2026`)  
-   - Else: latest day (narrow filters) or last 7 days (broad geo) from live `dataRange`
-2. Else **investigation** — resolve alert/investigation id or default live investigation  
-3. **Narrate** with Gemini from evidence JSON only (human dates, rounded numbers)
+1. Dashboard intent when geo/OS/format filters are detected (optional explicit dates)
+2. Otherwise resolve an investigation
+3. Narrate from evidence only
 
 Also: `GET /v1/models`.
 
----
-
-## Investigation JSON (shape)
-
-Key fields:
+## Investigation response fields
 
 | Field | Purpose |
 |-------|---------|
-| `alert` | Metric, window, severity, advertiser |
-| `decomposition` | Revenue identity factors + culprit |
-| `segments` | Top dimension drivers (capped) |
-| `ruledOut` | What was checked and cleared |
+| `alert` | Metric, window, severity |
+| `decomposition` | Revenue-identity factors |
+| `segments` | Top dimension drivers |
+| `ruledOut` | Checked and cleared factors |
 | `diagnosis` | Short text + citations |
-| `trace` | Ordered steps + durations |
-| `seasonality` | Flat vs seasonal residual |
-| `waterfall` | Contribution share |
-| `counterfactual` | “If culprit held…” |
-| `hypotheses` | Ranked confidence |
-| `evidence.hash` | SHA-256 lock over sources |
+| `trace` | Ordered steps |
+| `seasonality` / `waterfall` / `counterfactual` / `hypotheses` | RCA extras |
+| `evidence.hash` | Content hash over sources |
 
 Schema: [`packages/contracts/investigation.schema.json`](../packages/contracts/investigation.schema.json).

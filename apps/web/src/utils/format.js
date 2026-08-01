@@ -88,7 +88,6 @@ export const ALERT_CATEGORIES = [
   { id: 'content', label: 'Content', hint: 'App category / vertical (e.g. entertainment)' },
 ]
 
-/** Display helpers when opening an investigation from the Daily alert wall. */
 export function formatAlertViewWindow(alert, view = 'hour') {
   if (!alert?.windowStart) return ''
   if (view !== 'day') {

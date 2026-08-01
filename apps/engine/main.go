@@ -137,7 +137,7 @@ func main() {
 		}
 		bundle := map[string]any{
 			"exportedAt":     time.Now().UTC().Format(time.RFC3339),
-			"purpose":        "unseen-incident-submission",
+			"purpose":        "investigation-export",
 			"investigation":  inv,
 			"immutableTrace": inv.Trace,
 			"evidenceHash":   inv.Evidence.Hash,
@@ -147,7 +147,7 @@ func main() {
 			"counterfactual": inv.Counterfactual,
 			"hypotheses":     inv.Hypotheses,
 		}
-		w.Header().Set("Content-Disposition", `attachment; filename="`+inv.ID+`-unseen-export.json"`)
+		w.Header().Set("Content-Disposition", `attachment; filename="`+inv.ID+`-export.json"`)
 		writeJSON(w, bundle)
 	})
 

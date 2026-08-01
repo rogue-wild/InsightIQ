@@ -54,7 +54,7 @@ export async function getInvestigation(investigationId) {
   return fetchJson(`/api/investigations/${encodeURIComponent(investigationId)}`)
 }
 
-/** Downloadable unseen-incident bundle (diagnosis + immutable trace + evidence hash). */
+/** Downloadable investigation evidence bundle. */
 export async function exportInvestigationBundle(investigationId) {
   if (!apiBase) throw new Error('VITE_API_URL is not set')
   const res = await fetch(

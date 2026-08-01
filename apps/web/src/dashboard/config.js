@@ -33,13 +33,13 @@ export const FALLBACK_META = {
 }
 
 export const DATE_PRESETS = [
-  { id: 'day', label: 'Jun 21 (demo)' },
-  { id: 'last_7', label: 'Last 7 days (demo)' },
-  { id: 'june', label: 'All of June (demo)' },
+  { id: 'day', label: 'Single day' },
+  { id: 'last_7', label: 'Last 7 days' },
+  { id: 'june', label: 'Full month' },
   { id: 'custom', label: 'Custom' },
 ]
 
-/** Demo dataset spans 2026-06-01 .. 2026-07-05 */
+/** Preset windows aligned to the loaded snapshot range (2026-06-01 .. 2026-07-05). */
 export function rangeFromPreset(presetId) {
   if (presetId === 'last_7') {
     return {
@@ -53,7 +53,6 @@ export function rangeFromPreset(presetId) {
       end: '2026-06-30T23:59:59Z',
     }
   }
-  // default demo day with rich RCA/alerts
   return {
     start: '2026-06-21T00:00:00Z',
     end: '2026-06-21T23:59:59Z',

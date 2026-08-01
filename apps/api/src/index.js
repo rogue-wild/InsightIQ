@@ -110,7 +110,7 @@ app.get('/api/investigations/:investigationId/export', async (req, res) => {
       const bundle = await fetchJSON(`${engineUrl}/investigations/${encodeURIComponent(id)}/export`)
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${id}-unseen-export.json"`,
+        `attachment; filename="${id}-export.json"`,
       )
       return res.json(bundle)
     } catch (err) {
@@ -124,7 +124,7 @@ app.get('/api/investigations/:investigationId/export', async (req, res) => {
     if (!inv) return res.status(404).json({ error: 'investigation_not_found' })
     const bundle = {
       exportedAt: new Date().toISOString(),
-      purpose: 'unseen-incident-submission',
+      purpose: 'investigation-export',
       investigation: inv,
       immutableTrace: inv.trace || [],
       evidenceHash: inv.evidence?.hash || null,
@@ -134,7 +134,7 @@ app.get('/api/investigations/:investigationId/export', async (req, res) => {
       counterfactual: inv.counterfactual || null,
       hypotheses: inv.hypotheses || [],
     }
-    res.setHeader('Content-Disposition', `attachment; filename="${id}-unseen-export.json"`)
+    res.setHeader('Content-Disposition', `attachment; filename="${id}-export.json"`)
     res.json(bundle)
   } catch (err) {
     console.error(err)
@@ -501,7 +501,7 @@ function parseOneDayToken(text) {
     const d = Number(dmySlash[1])
     const m = Number(dmySlash[2])
     const y = Number(dmySlash[3])
-    // Prefer D/M/Y when day > 12; otherwise still treat as D/M/Y for hackathon demo locale.
+    // Prefer D/M/Y for slash-separated dates.
     if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
       return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
     }
@@ -705,7 +705,7 @@ async function investigationForAlert(alertId) {
     return await runEngineInvestigate({ alertId: uuid })
   }
 
-  // Legacy demo ids: alert-{metric}-{YYYY-MM-DD}
+  // Legacy ids: alert-{metric}-{YYYY-MM-DD}
   const dateMatch = alertId.match(/(\d{4}-\d{2}-\d{2})/)
   const metricMatch = alertId.match(/alert-([a-z_]+)-/)
   const metricAlias = {

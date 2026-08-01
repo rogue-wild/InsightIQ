@@ -30,7 +30,7 @@ export default function App() {
           </NavLink>
         </nav>
         <div className="header-meta">
-          <span>Click-a-thon 2026</span>
+          <span>Root-cause analytics</span>
         </div>
       </header>
       <main className="app-main">

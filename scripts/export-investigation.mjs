@@ -1,21 +1,10 @@
 #!/usr/bin/env node
 /**
- * Unseen-incident export CLI
+ * Investigation evidence export CLI
  *
- * Run from repo root:
- *   cd /Users/geospot/Developer/InsightIQ
- *
- * List live alerts (real UUIDs):
- *   node scripts/export-unseen.mjs --list
- *
- * Export by ClickHouse alert UUID (no angle brackets):
- *   node scripts/export-unseen.mjs --alertId=a1b2c3d4-e5f6-7890-abcd-ef1234567890 --out=./unseen-submission
- *
- * Export by investigation id:
- *   node scripts/export-unseen.mjs --investigationId=inv-a1b2c3d4-e5f6-7890-abcd-ef1234567890
- *
- * NOTE: Do NOT paste the literal text <NEW_ALERT_UUID> — zsh treats <...> as redirection.
- * Prefer live alert UUIDs from --list (or API /api/alerts).
+ *   node scripts/export-investigation.mjs --list
+ *   node scripts/export-investigation.mjs --alertId=<UUID> --out=./exports
+ *   node scripts/export-investigation.mjs --investigationId=inv-<UUID>
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -39,7 +28,6 @@ function stripPlaceholders(s) {
   return String(s || '')
     .trim()
     .replace(/^<|>$/g, '')
-    .replace(/^NEW_ALERT_UUID$/i, '')
 }
 
 async function fetchJSON(url, options) {
@@ -67,7 +55,6 @@ async function listAlerts() {
 }
 
 async function investigate(alertId) {
-  // Prefer API; fall back to engine for UUID lookups.
   try {
     return await fetchJSON(`${API}/api/investigate`, {
       method: 'POST',
@@ -78,11 +65,9 @@ async function investigate(alertId) {
     const msg = apiErr.message || String(apiErr)
     if (!UUID_RE.test(alertId)) {
       throw new Error(
-        [
-          `Investigate failed for "${alertId}".`,
-          'Use a live UUID from: node scripts/export-unseen.mjs --list',
-          `Detail: ${msg}`,
-        ].join('\n'),
+        [`Investigate failed for "${alertId}".`, 'List UUIDs with --list', `Detail: ${msg}`].join(
+          '\n',
+        ),
       )
     }
     return fetchJSON(`${ENGINE}/investigate`, {
@@ -101,7 +86,7 @@ async function exportBundle(investigationId, inv) {
   } catch {
     return {
       exportedAt: new Date().toISOString(),
-      purpose: 'unseen-incident-submission',
+      purpose: 'investigation-export',
       investigation: inv,
       immutableTrace: inv.trace || [],
       evidenceHash: inv.evidence?.hash || null,
@@ -116,22 +101,17 @@ async function exportBundle(investigationId, inv) {
 
 async function main() {
   if (hasFlag('help') || hasFlag('h')) {
-    console.log(`Usage (from repo root):
-  node scripts/export-unseen.mjs --list
-  node scripts/export-unseen.mjs --alertId=UUID --out=./unseen-submission
-  node scripts/export-unseen.mjs --investigationId=inv-UUID
-
-Do not wrap the id in <angle brackets>.
-Live alerts use UUIDs from alerts_live.`)
+    console.log(`Usage:
+  node scripts/export-investigation.mjs --list
+  node scripts/export-investigation.mjs --alertId=UUID --out=./exports
+  node scripts/export-investigation.mjs --investigationId=inv-UUID`)
     return
   }
 
   if (hasFlag('list')) {
     const alerts = await listAlerts()
     if (!Array.isArray(alerts) || alerts.length === 0) {
-      console.error(
-        'No alerts returned. Engine/API may be down, or alerts_live is empty (load data / check CLICKHOUSE_DATABASE).',
-      )
+      console.error('No alerts returned. Check engine/API and alerts_live.')
       process.exit(1)
     }
     console.log(`Found ${alerts.length} alerts:\n`)
@@ -142,17 +122,17 @@ Live alerts use UUIDs from alerts_live.`)
       )
     }
     console.log(`\nExample:
-  node scripts/export-unseen.mjs --alertId=${String(alerts[0].id).replace(/^inv-/i, '')} --out=./unseen-submission`)
+  node scripts/export-investigation.mjs --alertId=${String(alerts[0].id).replace(/^inv-/i, '')} --out=./exports`)
     return
   }
 
   const alertId = normalizeAlertId(arg('alertId'))
   let investigationId = stripPlaceholders(arg('investigationId'))
-  const outDir = path.resolve(arg('out', './unseen-submission'))
+  const outDir = path.resolve(arg('out', './exports'))
 
   let inv
   if (alertId) {
-    console.log(`Investigating alertId=${alertId} via API…`)
+    console.log(`Investigating alertId=${alertId}…`)
     inv = await investigate(alertId)
     investigationId = inv.id
   } else if (investigationId) {
@@ -163,13 +143,7 @@ Live alerts use UUIDs from alerts_live.`)
       inv = await fetchJSON(`${ENGINE}/investigations/${encodeURIComponent(investigationId)}`)
     }
   } else {
-    console.error(`Missing --alertId or --investigationId.
-
-First list live UUIDs:
-  node scripts/export-unseen.mjs --list
-
-Then export (example):
-  node scripts/export-unseen.mjs --alertId=YOUR-UUID-HERE --out=./unseen-submission`)
+    console.error('Missing --alertId or --investigationId. Use --list to discover UUIDs.')
     process.exit(1)
   }
 
@@ -179,7 +153,7 @@ Then export (example):
   }
 
   await mkdir(outDir, { recursive: true })
-  const file = path.join(outDir, `${investigationId}-unseen-export.json`)
+  const file = path.join(outDir, `${investigationId}-export.json`)
   await writeFile(file, JSON.stringify(bundle, null, 2))
   console.log('wrote', file)
   console.log('evidenceHash', bundle.evidenceHash || bundle.evidence?.hash || '(none)')

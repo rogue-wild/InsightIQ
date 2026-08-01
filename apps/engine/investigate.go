@@ -142,7 +142,7 @@ func runInvestigation(ctx context.Context, conn *chClient, req InvestigateReques
 	alertID := normalizeAlertID(req.AlertID)
 	var live *alertLiveRow
 	var err error
-	// Only look up alerts_live for real UUIDs. Legacy demo ids (alert-rev-YYYY-MM-DD)
+	// Only look up alerts_live for real UUIDs. Non-UUID ids
 	// use the window fields below instead.
 	if alertID != "" && looksLikeUUID(alertID) {
 		live, err = fetchAlertLive(ctx, conn, alertID)
@@ -735,7 +735,6 @@ func buildDiagnosisFromInsightIQ(
 		}
 	}
 
-	// Keep diagnosis short for the UI: headline + top drivers only (not every observation row).
 	text := fmt.Sprintf("%s %s %s",
 		humanMetric(alert.Metric), alert.Direction, formatPct(math.Abs(alert.PctChange)))
 	if alert.AdvertiserID != "" {
@@ -1117,10 +1116,7 @@ type alertListRow struct {
 	ZScore       float64
 }
 
-// detectAlerts builds the alert wall from alerts_live + contributors.
-// granularity: "day" (default) collapses to the peak |z| alert per advertiser+metric+UTC day;
-// "hour" keeps native hourly buckets from alerts_live.
-// Full investigations still run on open (peak-hour alert id is used for day cards).
+// detectAlerts builds the alert wall. granularity "day" (default) or "hour".
 func detectAlerts(ctx context.Context, conn *chClient, _ *invCache, granularity string) ([]map[string]any, error) {
 	if granularity != "hour" {
 		granularity = "day"

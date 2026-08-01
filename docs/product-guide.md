@@ -1,69 +1,47 @@
-# Product guide (UI)
-
-App shell: Dashboard · Alerts · Chat · Investigation.
+# Product guide
 
 ## Dashboard (`/`)
 
-- Live metrics from `metric_hourly_snapshot` via `/api/dashboard/query`
-- Date presets + custom range; compare prior equal-length window
-- Filters: region, country, OS, ad format, campaign, publisher tier, …
-- Charts + dimension breakdown tables for selected metrics
+- Metrics from `metric_hourly_snapshot` via `/api/dashboard/query`
+- Date range and prior-period compare
+- Dimension filters and breakdown tables
 
 ## Alerts (`/alerts`)
 
-### Granularity toggle
+### Granularity
 
-| Mode | Meaning |
-|------|---------|
-| **Daily** (default) | One card per advertiser per day = peak hourly anomaly that day |
+| Mode | Behavior |
+|------|----------|
+| **Daily** (default) | One card per advertiser per day (peak hourly anomaly) |
 | **Hourly** | Native hour buckets from `alerts_live` |
 
-Daily links open investigations with `?view=day` so the header shows:
-
-`21 Jun 2026 · peak hour 10:00 UTC`  
-`daily peak hour · vs same hour, prior 4 weeks`
-
-RCA math still runs on the **peak hour** (that is the real anomaly bucket).
+Daily opens investigations with `?view=day` so the header shows the calendar day and peak hour. RCA still runs on that peak hour bucket.
 
 ### Category tabs
 
-Geo / OS / Campaign / Ad format / Publisher / **Content** count alerts that already have a **contributor** in that dimension family.
+Count alerts that have contributors in that dimension family (geo, OS, campaign, format, publisher, content). Alerts without attribution appear under **All** only.
 
-If ClickHouse only has `vertical=entertainment` contributors, Content may be `1` while Geo/OS stay `0`. **All** still lists every wall card (including alerts without attribution yet).
-
-### Baseline labels
+### Baselines
 
 | Label | Meaning |
 |-------|---------|
-| vs same hour, prior 4 weeks | Expected ≈ same hour-of-day over ~4 weeks (seasonality-aware) |
-| daily peak hour | Daily card is a rollup; peak hour used that seasonal baseline |
+| vs same hour, prior 4 weeks | Same hour-of-day over prior weeks |
+| daily peak hour | Daily card rollup; peak hour used the seasonal baseline |
 
 ## Investigation (`/investigations/:id`)
 
-- Metric tree + contribution waterfall
-- Seasonality panel (flat prior-day vs seasonal residual)
-- Diagnosis (short) + citations (evidence-bound)
-- Segment table, ruled-out list, hypotheses, counterfactual
+- Metric tree and contribution waterfall
+- Seasonality, diagnosis, citations
+- Segments, ruled-out factors, hypotheses, counterfactual
 - Trace timeline
-- **Export unseen bundle** (JSON for judges)
-- **Ask in chat** deep-link with investigation context
+- Export evidence bundle
+- Ask-in-chat deep link
 
 ## Chat (`/chat`)
 
-In-app NL interface → `POST /v1/chat/completions`.
+Natural language → `POST /v1/chat/completions`.
 
-Examples:
+- Filter questions (region, country, OS, dates) → dashboard query
+- RCA questions → investigation evidence
 
-- `How is APAC revenue this week?` → dashboard query on latest live week  
-- `What is the revenue for India for iOS 17.2 on 21 June 2026?` → filtered day query  
-- `Why did revenue drop for inv-…?` → investigation narration  
-
-**Tables:** Markdown tables render if the model emits them.  
-**Charts:** not in chat yet — use Dashboard for graphs.  
-**LibreChat:** optional shell at `VITE_LIBRECHAT_URL` using the same API.
-
-## Design constraints (hackathon)
-
-- Live ClickHouse data only (no mock alert wall)
-- LLM never invents numbers — engine computes, Gemini narrates
-- Prefer short diagnosis copy for mentor-facing demos
+Markdown tables render if the model emits them. Charts live on the Dashboard. LibreChat can use the same `/v1` API when configured.

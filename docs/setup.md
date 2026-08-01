@@ -4,18 +4,16 @@
 
 - Node.js 20+
 - Go 1.22+
-- ClickHouse Cloud database `insightiq` loaded with the hackathon dataset
-- (Optional) Gemini API key, Langfuse project, LibreChat
+- ClickHouse Cloud (or compatible) database `insightiq` with the InsightIQ schema and data
+- Optional: Gemini API key, Langfuse, LibreChat
 
 ## Environment files
 
 ### `apps/engine/.env`
 
-Copy from `.env.example`:
-
 ```bash
 ENGINE_PORT=4100
-CLICKHOUSE_HOST=<your-cloud-host>
+CLICKHOUSE_HOST=<host>
 CLICKHOUSE_PORT=8443
 CLICKHOUSE_USER=default
 CLICKHOUSE_PASSWORD=<secret>
@@ -32,7 +30,6 @@ ENGINE_URL=http://127.0.0.1:4100
 GEMINI_API_KEY=<optional>
 GEMINI_MODEL=gemini-flash-lite-latest
 
-# Optional Langfuse (JP cloud example)
 LANGFUSE_SECRET_KEY=
 LANGFUSE_PUBLIC_KEY=
 LANGFUSE_BASE_URL=https://jp.cloud.langfuse.com
@@ -45,78 +42,53 @@ VITE_API_URL=http://localhost:4000
 VITE_LIBRECHAT_URL=http://localhost:3080
 ```
 
-## Start services (3 terminals)
+## Start services
 
 ```bash
-# 1) Engine
-cd apps/engine
-go build -o bin/engine .
-./bin/engine
-# → http://localhost:4100
+# Engine
+cd apps/engine && go build -o bin/engine . && ./bin/engine
 
-# 2) API
-cd apps/api
-npm install
-npm run dev   # or: node src/index.js
-# → http://localhost:4000
+# API
+cd apps/api && npm install && npm run dev
 
-# 3) Web
-cd apps/web
-npm install
-npm run dev
-# → http://localhost:5173
+# Web
+cd apps/web && npm install && npm run dev
 ```
 
-### Health checks
+| Service | URL |
+|---------|-----|
+| Web | http://localhost:5173 |
+| API | http://localhost:4000 |
+| Engine | http://localhost:4100 |
 
 ```bash
 curl -s http://127.0.0.1:4100/health
 curl -s http://127.0.0.1:4000/health
 ```
 
-Engine health includes `alerts` count and `database`. API health includes `engine`, `gemini`, and `langfuse`.
-
 ## LibreChat (optional)
 
-Config under `infra/librechat/`. Point LibreChat’s custom endpoint at:
-
-`http://host.docker.internal:4000/v1` (or your machine’s API URL)
-
-Model id: `insightiq-rca`.
-
-Web “Open in LibreChat” uses `VITE_LIBRECHAT_URL`.
+Config under `infra/librechat/`. Point the custom endpoint at the API `/v1` base. Model id: `insightiq-rca`.
 
 ## Langfuse (optional)
 
-With keys set in `apps/api/.env`, each chat turn emits:
+With keys set, chat turns emit `handle-chat-completion` → retrieve/investigate → `narrate-with-gemini`.
 
-- `handle-chat-completion`
-  - `retrieve-dashboard-evidence` *or* investigation resolve
-  - `narrate-with-gemini`
-
-Sessions are keyed by `sessionId` from the web client.
-
-## Unseen-incident export CLI
+## Investigation export CLI
 
 ```bash
-# List live alert UUIDs
-node scripts/export-unseen.mjs --list
-
-# Export by alert
-node scripts/export-unseen.mjs --alertId=<UUID> --out=./unseen-submission
-
-# Export by investigation
-node scripts/export-unseen.mjs --investigationId=inv-<UUID>
+node scripts/export-investigation.mjs --list
+node scripts/export-investigation.mjs --alertId=<UUID> --out=./exports
+node scripts/export-investigation.mjs --investigationId=inv-<UUID>
 ```
 
-Also available in the Investigation UI: **Export unseen bundle**.
+Also available in the Investigation UI as **Export** .
 
-## Common issues
+## Troubleshooting
 
 | Symptom | Likely cause |
 |---------|----------------|
-| `/api/alerts` empty | `alerts_live` empty, or engine down |
-| Chat uses wrong dates | Prefer ISO or natural dates (`21 June 2026`); otherwise latest snapshot window |
-| Dashboard meta slow | Fixed: date bounds query `agg_hourly`, not the VIEW |
-| Engine exit 137 | Process was SIGKILL’d — restart `./bin/engine` |
-| Mock-looking alerts | Live-only mode: no mock fallbacks; restart API after pulls |
+| Empty `/api/alerts` | No rows in `alerts_live`, or engine down |
+| Chat wrong date window | Pass an explicit date, or ensure snapshot `dataRange` is populated |
+| Dashboard meta slow | Engine should bound dates via `agg_hourly` |
+| API 502 on alerts | Engine not reachable at `ENGINE_URL` |

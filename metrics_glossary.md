@@ -1,7 +1,6 @@
-# Metrics Glossary — Ad-Events Dataset (PUBLIC)
-### ClickHouse Click-a-thon 2026 · "Automated Root-Cause Analyst"
+# Metrics Glossary
 
-All data is **synthetic**. No real advertiser, publisher, or user data. This page fixes the metric definitions so every team computes them identically — localization is judged on analysis quality, not on whose formula differed.
+Canonical metric definitions for InsightIQ (synthetic ad-events dataset).
 
 ## The ad funnel
 
