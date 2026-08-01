@@ -338,8 +338,12 @@ func appendCounterfactualCitation(d Diagnosis, cf Counterfactual) Diagnosis {
 		Value: fmt.Sprintf("%s recovered (%s of gap) if %s held",
 			formatNumber(cf.RecoveredRevenue), formatPct(cf.RecoveredPctOfGap), humanMetric(cf.Culprit)),
 	})
-	if !strings.Contains(d.Text, "If ") {
-		d.Text = strings.TrimSpace(d.Text) + " " + cf.Detail
+	// Keep diagnosis body short — full counterfactual detail lives in its own card.
+	if cf.Culprit != "" && !strings.Contains(d.Text, "Counterfactual") {
+		d.Text = strings.TrimSpace(d.Text) + fmt.Sprintf(
+			" Counterfactual: holding %s recovers %s of the gap.",
+			humanMetric(cf.Culprit), formatPct(cf.RecoveredPctOfGap),
+		)
 	}
 	return d
 }

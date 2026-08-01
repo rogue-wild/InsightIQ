@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { exportInvestigationBundle, getInvestigation } from '../api/client.js'
 import AskInChatButton from '../components/AskInChatButton.jsx'
 import CounterfactualCard from '../components/CounterfactualCard.jsx'
@@ -10,10 +10,16 @@ import SeasonalityPanel from '../components/SeasonalityPanel.jsx'
 import SegmentTable from '../components/SegmentTable.jsx'
 import StatusPill from '../components/StatusPill.jsx'
 import TraceTimeline from '../components/TraceTimeline.jsx'
-import { formatBaselineKind, formatMetric, formatWindow } from '../utils/format.js'
+import {
+  formatAlertViewBaseline,
+  formatAlertViewWindow,
+  formatMetric,
+} from '../utils/format.js'
 
 export default function InvestigationPage() {
   const { investigationId } = useParams()
+  const [searchParams] = useSearchParams()
+  const view = searchParams.get('view') === 'day' ? 'day' : 'hour'
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -43,6 +49,9 @@ export default function InvestigationPage() {
     setExporting(true)
     try {
       const bundle = await exportInvestigationBundle(data.id)
+      if (!bundle.evidenceHash && !bundle.evidence?.hash) {
+        console.warn('Export missing evidenceHash')
+      }
       const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -105,15 +114,13 @@ export default function InvestigationPage() {
             <StatusPill status={alert.severity}>{alert.severity}</StatusPill>
             <StatusPill status={data.status}>{data.status}</StatusPill>
           </div>
-          <p className="inv-window mono muted">
-            {formatWindow(alert.windowStart, alert.windowEnd, { withTime: true })}
-          </p>
+          <p className="inv-window mono muted">{formatAlertViewWindow(alert, view)}</p>
           <p
             className="muted"
             style={{ margin: '0.35rem 0 0' }}
-            title={formatBaselineKind(alert.baselineKind).hint}
+            title={formatAlertViewBaseline(alert, view).hint}
           >
-            Compared {formatBaselineKind(alert.baselineKind).label}
+            Compared {formatAlertViewBaseline(alert, view).label}
           </p>
         </div>
       </header>

@@ -1,11 +1,4 @@
-import {
-  alerts as mockAlerts,
-  getInvestigationById,
-  getInvestigationForAlert,
-} from '../mocks/investigation.js'
-
-const useMock = (import.meta.env.VITE_USE_MOCK ?? 'true') !== 'false'
-const apiBase = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
+const apiBase = (import.meta.env.VITE_API_URL ?? 'http://localhost:4000').replace(/\/$/, '')
 
 /** In-flight + short TTL cache — React StrictMode remounts effects in dev and would otherwise double-fetch. */
 const inflight = new Map()
@@ -13,6 +6,8 @@ const responseCache = new Map()
 const CACHE_TTL_MS = 30_000
 
 async function fetchJson(path) {
+  if (!apiBase) throw new Error('VITE_API_URL is not set')
+
   const cached = responseCache.get(path)
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
     return structuredClone(cached.data)
@@ -26,7 +21,8 @@ async function fetchJson(path) {
   const promise = (async () => {
     const res = await fetch(`${apiBase}${path}`)
     if (!res.ok) {
-      throw new Error(`API ${path} failed: ${res.status}`)
+      const body = await res.text()
+      throw new Error(`API ${path} failed: ${res.status} ${body.slice(0, 160)}`)
     }
     const data = await res.json()
     responseCache.set(path, { at: Date.now(), data })
@@ -42,58 +38,28 @@ async function fetchJson(path) {
   }
 }
 
-/** @returns {Promise<typeof mockAlerts>} */
-export async function listAlerts() {
-  if (useMock) {
-    await delay(180)
-    return structuredClone(mockAlerts)
-  }
-  return fetchJson('/api/alerts')
+/** @param {{ granularity?: 'day' | 'hour' }} [opts] */
+export async function listAlerts(opts = {}) {
+  const granularity = opts.granularity === 'hour' ? 'hour' : 'day'
+  return fetchJson(`/api/alerts?granularity=${encodeURIComponent(granularity)}`)
 }
 
 /** @param {string} alertId */
 export async function getAlert(alertId) {
-  if (useMock) {
-    await delay(120)
-    const alert = mockAlerts.find((a) => a.id === alertId)
-    if (!alert) throw new Error(`Alert not found: ${alertId}`)
-    return structuredClone(alert)
-  }
-  return fetchJson(`/api/alerts/${alertId}`)
+  return fetchJson(`/api/alerts/${encodeURIComponent(alertId)}`)
 }
 
 /** @param {string} investigationId */
 export async function getInvestigation(investigationId) {
-  if (useMock) {
-    await delay(220)
-    const inv = getInvestigationById(investigationId)
-    if (!inv) throw new Error(`Investigation not found: ${investigationId}`)
-    return structuredClone(inv)
-  }
-  return fetchJson(`/api/investigations/${investigationId}`)
+  return fetchJson(`/api/investigations/${encodeURIComponent(investigationId)}`)
 }
 
 /** Downloadable unseen-incident bundle (diagnosis + immutable trace + evidence hash). */
 export async function exportInvestigationBundle(investigationId) {
-  if (useMock) {
-    await delay(120)
-    const inv = getInvestigationById(investigationId)
-    if (!inv) throw new Error(`Investigation not found: ${investigationId}`)
-    return {
-      exportedAt: new Date().toISOString(),
-      purpose: 'unseen-incident-submission',
-      investigation: structuredClone(inv),
-      immutableTrace: inv.trace || [],
-      evidenceHash: inv.evidence?.hash || 'mock',
-      evidence: inv.evidence || { hash: 'mock', sources: ['mock'] },
-      seasonality: inv.seasonality || null,
-      waterfall: inv.waterfall || [],
-      counterfactual: inv.counterfactual || null,
-      hypotheses: inv.hypotheses || [],
-    }
-  }
   if (!apiBase) throw new Error('VITE_API_URL is not set')
-  const res = await fetch(`${apiBase}/api/investigations/${encodeURIComponent(investigationId)}/export`)
+  const res = await fetch(
+    `${apiBase}/api/investigations/${encodeURIComponent(investigationId)}/export`,
+  )
   if (!res.ok) {
     const body = await res.text()
     throw new Error(`Export failed: ${res.status} ${body.slice(0, 180)}`)
@@ -103,17 +69,7 @@ export async function exportInvestigationBundle(investigationId) {
 
 /** @param {string} alertId */
 export async function getInvestigationByAlert(alertId) {
-  if (useMock) {
-    await delay(220)
-    const inv = getInvestigationForAlert(alertId)
-    if (!inv) throw new Error(`Investigation not found for alert: ${alertId}`)
-    return structuredClone(inv)
-  }
-  return fetchJson(`/api/alerts/${alertId}/investigation`)
-}
-
-export function isMockMode() {
-  return useMock
+  return fetchJson(`/api/alerts/${encodeURIComponent(alertId)}/investigation`)
 }
 
 export function clearApiCache() {
@@ -124,26 +80,10 @@ export function clearApiCache() {
 /**
  * OpenAI-compatible chat against the InsightIQ API.
  * @param {{role: string, content: string}[]} messages
- * @param {{ investigationId?: string, alertId?: string }} [context]
+ * @param {{ investigationId?: string, alertId?: string, sessionId?: string }} [context]
  */
 export async function sendChatMessage(messages, context = {}) {
-  if (useMock) {
-    await delay(400)
-    const last = [...messages].reverse().find((m) => m.role === 'user')
-    return [
-      'Mock InsightIQ reply (set `VITE_USE_MOCK=false` for live narration).',
-      '',
-      `You asked: ${last?.content || '(empty)'}`,
-      context.investigationId ? `Investigation: ${context.investigationId}` : null,
-      context.alertId ? `Alert: ${context.alertId}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n')
-  }
-
-  if (!apiBase) {
-    throw new Error('VITE_API_URL is not set')
-  }
+  if (!apiBase) throw new Error('VITE_API_URL is not set')
 
   const seeded = [...messages]
   const contextId = context.investigationId || context.alertId
@@ -194,12 +134,7 @@ export async function sendChatMessage(messages, context = {}) {
   return text
 }
 
-import { FALLBACK_META } from '../dashboard/config.js'
-
 export async function getDashboardMeta() {
-  if (useMock || !apiBase) {
-    return FALLBACK_META
-  }
   return fetchJson('/api/dashboard/meta')
 }
 
@@ -218,12 +153,7 @@ export async function queryDashboard(body) {
 }
 
 export async function getDashboardFilterValues({ dimension, start, end }) {
-  if (!apiBase) return []
   const qs = new URLSearchParams({ dimension, start, end }).toString()
   const data = await fetchJson(`/api/dashboard/filters?${qs}`)
   return data.values || []
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }

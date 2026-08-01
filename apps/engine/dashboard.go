@@ -69,6 +69,40 @@ func dashboardMeta() map[string]any {
 	return map[string]any{"metrics": metrics, "dimensions": dims}
 }
 
+func queryDataRange(ctx context.Context, conn *chClient) (map[string]any, error) {
+	// Prefer agg_hourly (physical SummingMergeTree) over metric_hourly_snapshot (VIEW).
+	// Full-scan min/max/count on the view was timing out once the demo load landed (~9M rows).
+	rows, err := conn.QueryMaps(ctx, `
+		SELECT
+			min(bucket) AS min_bucket,
+			max(bucket) AS max_bucket,
+			count() AS buckets
+		FROM agg_hourly
+	`)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return map[string]any{"min": nil, "max": nil, "buckets": 0}, nil
+	}
+	buckets := int64(asFloat(rows[0]["buckets"]))
+	if buckets == 0 {
+		return map[string]any{"min": nil, "max": nil, "buckets": 0}, nil
+	}
+	minB, _ := parseCHTime(asString(rows[0]["min_bucket"]))
+	maxB, _ := parseCHTime(asString(rows[0]["max_bucket"]))
+	// ClickHouse min/max on empty aggregates can surface epoch; treat as missing.
+	if minB.Year() < 2000 || maxB.Year() < 2000 {
+		return map[string]any{"min": nil, "max": nil, "buckets": buckets}, nil
+	}
+	end := maxB.UTC().Truncate(time.Hour).Add(time.Hour - time.Second)
+	return map[string]any{
+		"min":     minB.UTC().Format(time.RFC3339),
+		"max":     end.Format(time.RFC3339),
+		"buckets": buckets,
+	}, nil
+}
+
 func runDashboard(ctx context.Context, conn *chClient, req DashboardRequest) (map[string]any, error) {
 	start, end, err := resolveDashboardWindow(req.Start, req.End)
 	if err != nil {
@@ -184,9 +218,7 @@ func queryFilterValues(ctx context.Context, conn *chClient, dimension, startStr,
 
 func resolveDashboardWindow(startStr, endStr string) (time.Time, time.Time, error) {
 	if startStr == "" || endStr == "" {
-		start, _ := time.Parse(time.RFC3339, "2026-06-21T00:00:00Z")
-		end := start.Add(24*time.Hour - time.Second)
-		return start, end, nil
+		return time.Time{}, time.Time{}, fmt.Errorf("start and end are required")
 	}
 	start, err := parseFlexibleTime(startStr)
 	if err != nil {
@@ -471,8 +503,19 @@ func computeTotalsDelta(current, compare map[string]float64) map[string]any {
 	return out
 }
 
-func handleDashboardMeta(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, dashboardMeta())
+func handleDashboardMeta(conn *chClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		out := dashboardMeta()
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		if rng, err := queryDataRange(ctx, conn); err == nil {
+			out["dataRange"] = rng
+		} else {
+			log.Printf("dashboard dataRange: %v", err)
+			out["dataRange"] = map[string]any{"min": nil, "max": nil, "buckets": 0, "error": err.Error()}
+		}
+		writeJSON(w, out)
+	}
 }
 
 func handleDashboardQuery(conn *chClient) http.HandlerFunc {

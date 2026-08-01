@@ -142,7 +142,9 @@ func runInvestigation(ctx context.Context, conn *chClient, req InvestigateReques
 	alertID := normalizeAlertID(req.AlertID)
 	var live *alertLiveRow
 	var err error
-	if alertID != "" {
+	// Only look up alerts_live for real UUIDs. Legacy demo ids (alert-rev-YYYY-MM-DD)
+	// use the window fields below instead.
+	if alertID != "" && looksLikeUUID(alertID) {
 		live, err = fetchAlertLive(ctx, conn, alertID)
 		if err != nil {
 			return nil, err
@@ -269,9 +271,14 @@ func runInvestigation(ctx context.Context, conn *chClient, req InvestigateReques
 	mark("evidence", "Packaged evidence + waterfall + counterfactual + hypotheses", t4)
 	trace = append(trace, TraceStep{Step: "narrate", Detail: "Narration deferred to Node/Gemini from evidence only", DurationMs: 0})
 
+	uiSegments := segments
+	if len(uiSegments) > 6 {
+		uiSegments = uiSegments[:6]
+	}
+
 	inv := &Investigation{
 		ID: invID, Status: "complete", Alert: alert,
-		Decomposition: decomp, Segments: segments, RuledOut: ruledOut,
+		Decomposition: decomp, Segments: uiSegments, RuledOut: ruledOut,
 		Diagnosis: diagnosis, Trace: trace,
 		Seasonality: seasonality, Waterfall: waterfall,
 		Counterfactual: counterfactual, Hypotheses: hypotheses,
@@ -378,6 +385,7 @@ func fetchObservations(ctx context.Context, conn *chClient, alertID string) ([]o
 		FROM alert_observations
 		WHERE alert_id = toUUID(%s)
 		ORDER BY observation_order
+		LIMIT 8
 	`, quoteString(alertID))
 	rows, err := conn.QueryMaps(ctx, q)
 	if err != nil {
@@ -719,20 +727,6 @@ func buildDiagnosisFromInsightIQ(
 		)
 	}
 
-	if len(observations) > 0 {
-		parts := make([]string, 0, len(observations))
-		for _, o := range observations {
-			parts = append(parts, o.Detail)
-			citations = append(citations, Citation{Label: o.Title, Value: o.Detail})
-		}
-		text := strings.Join(parts, " ")
-		if alert.AdvertiserID != "" {
-			text = fmt.Sprintf("%s for %s %s %s. %s",
-				humanMetric(alert.Metric), alert.AdvertiserID, alert.Direction, formatPct(math.Abs(alert.PctChange)), text)
-		}
-		return Diagnosis{Text: text, Citations: citations}
-	}
-
 	var culpritFactor *Factor
 	for i := range decomp {
 		if decomp[i].Factor == culprit {
@@ -740,48 +734,79 @@ func buildDiagnosisFromInsightIQ(
 			break
 		}
 	}
-	top := ""
-	if len(segments) > 0 {
-		parts := []string{}
-		for i, s := range segments {
-			if i >= 3 {
-				break
-			}
-			parts = append(parts, fmt.Sprintf("%s %s (%s)",
-				humanDimension(s.Dimension), s.Value, formatSignedPct(s.DeltaPct)))
+
+	// Keep diagnosis short for the UI: headline + top drivers only (not every observation row).
+	text := fmt.Sprintf("%s %s %s",
+		humanMetric(alert.Metric), alert.Direction, formatPct(math.Abs(alert.PctChange)))
+	if alert.AdvertiserID != "" {
+		text = fmt.Sprintf("%s for %s %s %s",
+			humanMetric(alert.Metric), alert.AdvertiserID, alert.Direction, formatPct(math.Abs(alert.PctChange)))
+	}
+	if culprit != "" {
+		text += ", primarily driven by " + humanMetric(culprit)
+		if culpritFactor != nil {
+			text += fmt.Sprintf(" (%s → %s, %s)",
+				formatFactorValue(culprit, culpritFactor.Baseline),
+				formatFactorValue(culprit, culpritFactor.Observed),
+				formatSignedPct(culpritFactor.DeltaPct),
+			)
+			citations = append(citations, Citation{
+				Label: culpritFactor.Label + " change",
+				Value: formatSignedPct(culpritFactor.DeltaPct),
+			})
 		}
-		top = strings.Join(parts, "; ")
 	}
 
-	text := fmt.Sprintf("%s %s %s, primarily driven by %s",
-		humanMetric(alert.Metric), alert.Direction, formatPct(math.Abs(alert.PctChange)), humanMetric(culprit))
-	if culpritFactor != nil {
-		text += fmt.Sprintf(" (%s to %s, %s)",
-			formatFactorValue(culprit, culpritFactor.Baseline),
-			formatFactorValue(culprit, culpritFactor.Observed),
-			formatSignedPct(culpritFactor.DeltaPct),
-		)
-		citations = append(citations, Citation{
-			Label: culpritFactor.Label + " change",
-			Value: formatSignedPct(culpritFactor.DeltaPct),
-		})
+	topSegs := segments
+	if len(topSegs) > 3 {
+		topSegs = topSegs[:3]
 	}
-	if top != "" {
-		text += ". Top segments: " + top + "."
+	if len(topSegs) > 0 {
+		parts := make([]string, 0, len(topSegs))
+		for _, s := range topSegs {
+			parts = append(parts, fmt.Sprintf("%s=%s (%s, contrib %s)",
+				humanDimension(s.Dimension), s.Value, formatSignedPct(s.DeltaPct), formatPct(s.ContributionPct)))
+			citations = append(citations, Citation{
+				Label: fmt.Sprintf("%s: %s", humanDimension(s.Dimension), s.Value),
+				Value: fmt.Sprintf("%s · contrib %s", formatSignedPct(s.DeltaPct), formatPct(s.ContributionPct)),
+			})
+		}
+		text += ". Top segments: " + strings.Join(parts, "; ") + "."
+	} else if len(observations) > 0 {
+		// Fallback when snapshot segments are empty but CH observations exist.
+		limit := 3
+		if len(observations) < limit {
+			limit = len(observations)
+		}
+		parts := make([]string, 0, limit)
+		for i := 0; i < limit; i++ {
+			o := observations[i]
+			parts = append(parts, shortenObservationDetail(o.Detail))
+			citations = append(citations, Citation{
+				Label: fmt.Sprintf("%s (%d)", o.Title, i+1),
+				Value: shortenObservationDetail(o.Detail),
+			})
+		}
+		text += ". " + strings.Join(parts, " ")
 	}
+
 	if len(ruled) > 0 {
 		text += " Ruled out: " + ruled[0].Reason + "."
 	}
-	for i, s := range segments {
-		if i >= 3 {
-			break
-		}
-		citations = append(citations, Citation{
-			Label: fmt.Sprintf("%s: %s", humanDimension(s.Dimension), s.Value),
-			Value: fmt.Sprintf("%s (contribution %s)", formatSignedPct(s.DeltaPct), formatPct(s.ContributionPct)),
-		})
-	}
 	return Diagnosis{Text: text, Citations: citations}
+}
+
+func shortenObservationDetail(detail string) string {
+	d := strings.TrimSpace(detail)
+	// Strip verbose "Dimension value \"x\" went from..." boilerplate when possible.
+	if strings.Contains(d, `Dimension value "`) {
+		re := strings.NewReplacer(`Dimension value "`, "", `" went from`, ":", " (delta:", " Δ", ", contribution:", " ·")
+		d = re.Replace(d)
+	}
+	if len(d) > 140 {
+		return d[:137] + "…"
+	}
+	return d
 }
 
 func humanMetric(m string) string {
@@ -993,7 +1018,7 @@ func requestFromInvestigationID(id string) (InvestigateRequest, error) {
 }
 
 // Alert wall categories exposed to the UI.
-var alertCategoryOrder = []string{"geo", "os", "campaign_type", "ad_format", "publisher_tier"}
+var alertCategoryOrder = []string{"geo", "os", "campaign_type", "ad_format", "publisher_tier", "content"}
 
 func categoryForDimension(dim string) string {
 	switch strings.ToLower(dim) {
@@ -1007,6 +1032,8 @@ func categoryForDimension(dim string) string {
 		return "ad_format"
 	case "publisher_tier":
 		return "publisher_tier"
+	case "category", "vertical":
+		return "content"
 	default:
 		return ""
 	}
@@ -1091,11 +1118,14 @@ type alertListRow struct {
 }
 
 // detectAlerts builds the alert wall from alerts_live + contributors.
-// It intentionally does NOT run full investigations (those happen on open).
-// Only adv_0000 currently has alert_observations rows; preferring those
-// previously collapsed the wall to a single advertiser and made /alerts slow.
-func detectAlerts(ctx context.Context, conn *chClient, _ *invCache) ([]map[string]any, error) {
-	rows, err := selectAlertListRows(ctx, conn, 28)
+// granularity: "day" (default) collapses to the peak |z| alert per advertiser+metric+UTC day;
+// "hour" keeps native hourly buckets from alerts_live.
+// Full investigations still run on open (peak-hour alert id is used for day cards).
+func detectAlerts(ctx context.Context, conn *chClient, _ *invCache, granularity string) ([]map[string]any, error) {
+	if granularity != "hour" {
+		granularity = "day"
+	}
+	rows, err := selectAlertListRows(ctx, conn, 28, granularity)
 	if err != nil {
 		return nil, err
 	}
@@ -1142,17 +1172,28 @@ func detectAlerts(ctx context.Context, conn *chClient, _ *invCache) ([]map[strin
 			AlertID: r.AlertID, AdvertiserID: r.AdvertiserID, Metric: metric,
 			Bucket: r.Bucket, Actual: r.Actual, Expected: r.Expected, ZScore: r.ZScore,
 		}
-		windowStart := r.Bucket.UTC()
-		windowEnd := r.Bucket.Add(time.Hour - time.Second).UTC()
+		var windowStart, windowEnd time.Time
+		baselineKind := "same_hour_4w_seasonality"
+		if granularity == "day" {
+			day := time.Date(r.Bucket.UTC().Year(), r.Bucket.UTC().Month(), r.Bucket.UTC().Day(), 0, 0, 0, 0, time.UTC)
+			windowStart = day
+			windowEnd = day.Add(24*time.Hour - time.Second)
+			baselineKind = "daily_peak_hour"
+		} else {
+			windowStart = r.Bucket.UTC()
+			windowEnd = r.Bucket.Add(time.Hour - time.Second).UTC()
+		}
 		summary := buildAlertListSummary(r.AdvertiserID, metric, direction, pct, segments, obsByAlert[r.AlertID])
 		item := map[string]any{
 			"id": r.AlertID, "metric": metric, "direction": direction,
-			"pctChange": round1(pct),
-			"windowStart": windowStart.Format(time.RFC3339),
-			"windowEnd":   windowEnd.Format(time.RFC3339),
-			"baselineKind": "same_hour_4w_seasonality",
-			"severity":     severityFromZOrPct(live, math.Abs(pct)),
-			"advertiserId": r.AdvertiserID,
+			"pctChange":       round1(pct),
+			"windowStart":    windowStart.Format(time.RFC3339),
+			"windowEnd":      windowEnd.Format(time.RFC3339),
+			"baselineKind":   baselineKind,
+			"granularity":    granularity,
+			"sourceBucket":   r.Bucket.UTC().Format(time.RFC3339),
+			"severity":      severityFromZOrPct(live, math.Abs(pct)),
+			"advertiserId":   r.AdvertiserID,
 			"investigationId": "inv-" + r.AlertID,
 			"status":          "complete",
 			"summary":         summary,
@@ -1187,9 +1228,12 @@ func buildAlertListSummary(advertiserID, metric, direction string, pct float64, 
 	return head + ". Top segments: " + strings.Join(parts, "; ") + "."
 }
 
-func selectAlertListRows(ctx context.Context, conn *chClient, limit int) ([]alertListRow, error) {
+func selectAlertListRows(ctx context.Context, conn *chClient, limit int, granularity string) ([]alertListRow, error) {
 	if limit <= 0 {
 		limit = 24
+	}
+	if granularity != "hour" {
+		granularity = "day"
 	}
 	seen := map[string]bool{}
 	out := make([]alertListRow, 0, limit)
@@ -1216,8 +1260,37 @@ func selectAlertListRows(ctx context.Context, conn *chClient, limit int) ([]aler
 		}
 	}
 
-	// 1) Alerts that already have dimension contributors / observations (richer summaries + categories).
-	// Today this is mostly adv_0000 in the demo dataset.
+	// Peak |z| per advertiser+metric+UTC day (alerts_live is hourly-only today).
+	const dailyPeaksCTE = `
+		WITH daily_peaks AS (
+			SELECT
+				alert_id,
+				advertiser_id,
+				metric,
+				bucket,
+				actual,
+				expected,
+				zscore
+			FROM (
+				SELECT
+					alert_id,
+					advertiser_id,
+					metric,
+					bucket,
+					actual,
+					expected,
+					zscore,
+					row_number() OVER (
+						PARTITION BY advertiser_id, metric, toDate(bucket)
+						ORDER BY abs(zscore) DESC
+					) AS day_rn
+				FROM alerts_live
+				WHERE abs(zscore) > 3
+			)
+			WHERE day_rn = 1
+		)
+	`
+
 	richLimit := limit / 3
 	if richLimit < 6 {
 		richLimit = 6
@@ -1225,24 +1298,46 @@ func selectAlertListRows(ctx context.Context, conn *chClient, limit int) ([]aler
 	if richLimit > limit {
 		richLimit = limit
 	}
-	rich, err := conn.QueryMaps(ctx, fmt.Sprintf(`
-		SELECT
-			toString(a.alert_id) AS id,
-			a.advertiser_id AS advertiser_id,
-			a.metric AS metric,
-			toString(a.bucket) AS bucket,
-			a.actual AS actual,
-			a.expected AS expected,
-			a.zscore AS zscore
-		FROM alerts_live AS a
-		WHERE abs(a.zscore) > 3
-		  AND (
-			a.alert_id IN (SELECT DISTINCT alert_id FROM alert_dimension_contributors)
-			OR a.alert_id IN (SELECT DISTINCT alert_id FROM alert_observations)
-		  )
-		ORDER BY abs(a.zscore) DESC
-		LIMIT %d
-	`, richLimit))
+
+	var rich []map[string]any
+	var err error
+	if granularity == "day" {
+		rich, err = conn.QueryMaps(ctx, fmt.Sprintf(`
+			%s
+			SELECT
+				toString(alert_id) AS id,
+				advertiser_id,
+				metric,
+				toString(bucket) AS bucket,
+				actual,
+				expected,
+				zscore
+			FROM daily_peaks
+			WHERE alert_id IN (SELECT DISTINCT alert_id FROM alert_dimension_contributors)
+			   OR alert_id IN (SELECT DISTINCT alert_id FROM alert_observations)
+			ORDER BY abs(zscore) DESC
+			LIMIT %d
+		`, dailyPeaksCTE, richLimit))
+	} else {
+		rich, err = conn.QueryMaps(ctx, fmt.Sprintf(`
+			SELECT
+				toString(a.alert_id) AS id,
+				a.advertiser_id AS advertiser_id,
+				a.metric AS metric,
+				toString(a.bucket) AS bucket,
+				a.actual AS actual,
+				a.expected AS expected,
+				a.zscore AS zscore
+			FROM alerts_live AS a
+			WHERE abs(a.zscore) > 3
+			  AND (
+				a.alert_id IN (SELECT DISTINCT alert_id FROM alert_dimension_contributors)
+				OR a.alert_id IN (SELECT DISTINCT alert_id FROM alert_observations)
+			  )
+			ORDER BY abs(a.zscore) DESC
+			LIMIT %d
+		`, richLimit))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1251,44 +1346,87 @@ func selectAlertListRows(ctx context.Context, conn *chClient, limit int) ([]aler
 		return out, nil
 	}
 
-	// 2) Fill the rest with the strongest alert per remaining advertiser so the wall
-	// covers many accounts (not only the pre-narrated demo advertiser).
-	exclude := make([]string, 0, len(out))
+	excludeIDs := make([]string, 0, len(out))
+	for _, r := range out {
+		excludeIDs = append(excludeIDs, "toUUID("+quoteString(r.AlertID)+")")
+	}
+	excludeIDClause := ""
+	if len(excludeIDs) > 0 {
+		excludeIDClause = " AND alert_id NOT IN (" + strings.Join(excludeIDs, ",") + ")"
+	}
+
+	excludeAds := make([]string, 0, len(out))
 	for _, r := range out {
 		if r.AdvertiserID != "" {
-			exclude = append(exclude, quoteString(r.AdvertiserID))
+			excludeAds = append(excludeAds, quoteString(r.AdvertiserID))
 		}
 	}
-	excludeClause := ""
-	if len(exclude) > 0 {
-		excludeClause = " AND advertiser_id NOT IN (" + strings.Join(exclude, ",") + ")"
+	excludeAdClause := ""
+	if len(excludeAds) > 0 {
+		excludeAdClause = " AND advertiser_id NOT IN (" + strings.Join(excludeAds, ",") + ")"
 	}
-	diverse, err := conn.QueryMaps(ctx, fmt.Sprintf(`
-		SELECT
-			toString(alert_id) AS id,
-			advertiser_id,
-			metric,
-			toString(bucket) AS bucket,
-			actual,
-			expected,
-			zscore
-		FROM (
+
+	var diverse []map[string]any
+	if granularity == "day" {
+		// One card per advertiser+day from remaining daily peaks.
+		diverse, err = conn.QueryMaps(ctx, fmt.Sprintf(`
+			%s
 			SELECT
-				alert_id,
+				toString(alert_id) AS id,
 				advertiser_id,
 				metric,
-				bucket,
+				toString(bucket) AS bucket,
 				actual,
 				expected,
-				zscore,
-				row_number() OVER (PARTITION BY advertiser_id ORDER BY abs(zscore) DESC) AS rn
-			FROM alerts_live
-			WHERE abs(zscore) > 3%s
-		)
-		WHERE rn = 1
-		ORDER BY abs(zscore) DESC
-		LIMIT %d
-	`, excludeClause, limit-len(out)))
+				zscore
+			FROM (
+				SELECT
+					alert_id,
+					advertiser_id,
+					metric,
+					bucket,
+					actual,
+					expected,
+					zscore,
+					row_number() OVER (
+						PARTITION BY advertiser_id, toDate(bucket)
+						ORDER BY abs(zscore) DESC
+					) AS rn
+				FROM daily_peaks
+				WHERE 1=1%s
+			)
+			WHERE rn = 1
+			ORDER BY abs(zscore) DESC
+			LIMIT %d
+		`, dailyPeaksCTE, excludeIDClause, limit-len(out)))
+	} else {
+		diverse, err = conn.QueryMaps(ctx, fmt.Sprintf(`
+			SELECT
+				toString(alert_id) AS id,
+				advertiser_id,
+				metric,
+				toString(bucket) AS bucket,
+				actual,
+				expected,
+				zscore
+			FROM (
+				SELECT
+					alert_id,
+					advertiser_id,
+					metric,
+					bucket,
+					actual,
+					expected,
+					zscore,
+					row_number() OVER (PARTITION BY advertiser_id ORDER BY abs(zscore) DESC) AS rn
+				FROM alerts_live
+				WHERE abs(zscore) > 3%s
+			)
+			WHERE rn = 1
+			ORDER BY abs(zscore) DESC
+			LIMIT %d
+		`, excludeAdClause, limit-len(out)))
+	}
 	if err != nil {
 		return nil, err
 	}

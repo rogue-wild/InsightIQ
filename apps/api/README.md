@@ -8,7 +8,7 @@ npm install
 npm run dev
 ```
 
-Requires `apps/engine` on `ENGINE_URL` (default `http://127.0.0.1:4100`) when `USE_ENGINE=true`.
+Requires `apps/engine` on `ENGINE_URL` (default `http://127.0.0.1:4100`).
 
 ## Langfuse
 

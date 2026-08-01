@@ -1,5 +1,4 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
-import { isMockMode } from './api/client.js'
 import AlertsPage from './pages/AlertsPage.jsx'
 import ChatPage from './pages/ChatPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
@@ -31,8 +30,6 @@ export default function App() {
           </NavLink>
         </nav>
         <div className="header-meta">
-          <span>{isMockMode() ? 'mock data' : 'live api'}</span>
-          <span>·</span>
           <span>Click-a-thon 2026</span>
         </div>
       </header>

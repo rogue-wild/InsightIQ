@@ -1,71 +1,76 @@
 # InsightIQ
 
-ClickHouse-native autonomous analytics control plane: detect metric anomalies, isolate root causes, and narrate verified answers in plain English.
+ClickHouse-native autonomous analytics control plane for **Click-a-thon 2026 (InMobi)**: detect metric anomalies, isolate root causes, and narrate verified answers in plain English.
 
-## Current status
+**Full documentation:** [docs/README.md](docs/README.md)
 
-- React dashboard (mock or live API)
-- Go investigation engine on ClickHouse Cloud (`insightiq` view layer)
-- Node API proxy + Gemini narration + LibreChat `/v1` endpoint
-
-## Run
+## Quick start
 
 ```bash
-# Go engine (ClickHouse RCA)
-cd apps/engine && go run .
+# Terminal 1 — Go engine (ClickHouse RCA)
+cd apps/engine && go build -o bin/engine . && ./bin/engine
 
-# Node API
-cd apps/api && npm run dev
+# Terminal 2 — Node API
+cd apps/api && npm install && npm run dev
 
-# Dashboard + in-app chat
-cd apps/web && npm run dev
+# Terminal 3 — Web
+cd apps/web && npm install && npm run dev
 ```
 
-- Engine: http://localhost:4100  
-- API: http://localhost:4000  
-- Web: http://localhost:5173 (`/dashboard` analytics, `/chat` RCA chat)  
-- LibreChat (white-labeled InsightIQ + MCP): http://localhost:3080
+| Service | URL |
+|---------|-----|
+| Web | http://localhost:5173 |
+| API | http://localhost:4000 |
+| Engine | http://localhost:4100 |
+| LibreChat (optional) | http://localhost:3080 |
 
-Set `VITE_LIBRECHAT_URL=http://localhost:3080` and optionally `VITE_USE_MOCK=false` + `VITE_API_URL=http://localhost:4000` in `apps/web/.env`.
+Web env (`apps/web/.env`):
+
+```bash
+VITE_API_URL=http://localhost:4000
+VITE_LIBRECHAT_URL=http://localhost:3080
+```
+
+Engine / API ClickHouse + Gemini + Langfuse keys: see [docs/setup.md](docs/setup.md).
+
+## What it does
+
+1. **Detect** — z-score alerts from `alerts_live` (Daily or Hourly wall)  
+2. **Drill down** — Go engine: baseline → metric tree → segments → seasonality / counterfactual  
+3. **Narrate** — Gemini explains evidence JSON only (no invented numbers)  
+4. **Export** — unseen-incident bundle with immutable trace + evidence SHA-256  
 
 ## Repo layout
 
 ```
-apps/web/       Vite + React dashboard
-apps/api/       Node API (REST, Gemini, LibreChat compatible)
-apps/engine/    Go ClickHouse investigation engine
-packages/contracts/
-infra/librechat/
-data/           ad_events.csv + dimension tables
+apps/web/          React dashboard, alerts, investigation, chat
+apps/api/          REST + Gemini + LibreChat /v1 + Langfuse
+apps/engine/       Go ClickHouse investigation engine
+packages/contracts Investigation schema
+infra/clickhouse/  View-layer SQL reference
+infra/librechat/   LibreChat white-label
+docs/              Architecture, setup, API, demo guide
+scripts/           Unseen export CLI
 ```
 
-## ClickHouse (InsightIQ)
+## Docs index
 
-Database `insightiq` — autonomous analytics control plane:
+| Doc | Description |
+|-----|-------------|
+| [docs/architecture.md](docs/architecture.md) | System design |
+| [docs/setup.md](docs/setup.md) | Run locally |
+| [docs/data-model.md](docs/data-model.md) | ClickHouse tables / MVs |
+| [docs/api-reference.md](docs/api-reference.md) | Endpoints |
+| [docs/product-guide.md](docs/product-guide.md) | UI behavior |
+| [docs/hackathon-demo.md](docs/hackathon-demo.md) | Mentor / judging pitch |
 
-- `ad_events_raw` → `agg_hourly` → `metric_hourly_snapshot`
-- `baseline_hourly` + z-score → `alerts_live`
-- RCA: `alert_dimension_contributors`, `alert_observations`
-
-Engine + MCP read the pre-computed view layer only (never scan raw events for UI/chat).
-Credentials live in gitignored `apps/engine/.env` and `apps/api/.env`.
-
-See [infra/clickhouse/insightiq_view_layer.sql](infra/clickhouse/insightiq_view_layer.sql).
-
-## Contract
-
-See [packages/contracts/investigation.schema.json](packages/contracts/investigation.schema.json).
+Also: [PROBLEM_STATEMENT.md](PROBLEM_STATEMENT.md), [metrics_glossary.md](metrics_glossary.md).
 
 ## Unseen-incident export
 
-From an investigation in the UI: **Export unseen bundle**.
-
-Or CLI:
+UI: Investigation → **Export unseen bundle**
 
 ```bash
-node scripts/export-unseen.mjs --alertId=<uuid> --out=./unseen-out
-# or
-node scripts/export-unseen.mjs --investigationId=inv-<uuid>
+node scripts/export-unseen.mjs --list
+node scripts/export-unseen.mjs --alertId=<UUID> --out=./unseen-out
 ```
-
-Writes `{id}-unseen-export.json` with diagnosis, immutable trace, evidence SHA-256, seasonality, waterfall, counterfactual, and hypotheses.

@@ -5,13 +5,6 @@ import {
   propagateAttributes,
   startActiveObservation,
 } from '@langfuse/tracing'
-import {
-  alerts as mockAlerts,
-  getAlertById as getMockAlert,
-  getInvestigationById as getMockInvestigation,
-  getInvestigationForAlert as getMockInvestigationForAlert,
-  investigations as mockInvestigations,
-} from '../../../packages/contracts/sample-investigations.js'
 import { flushLangfuse } from './instrumentation.js'
 
 const app = express()
@@ -19,7 +12,6 @@ const port = Number(process.env.PORT || 4000)
 const geminiKey = process.env.GEMINI_API_KEY || ''
 const geminiModel = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest'
 const engineUrl = (process.env.ENGINE_URL || 'http://127.0.0.1:4100').replace(/\/$/, '')
-const useEngine = (process.env.USE_ENGINE || 'true') === 'true'
 const langfuseEnabled = Boolean(
   process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY,
 )
@@ -31,43 +23,51 @@ app.use(express.json({ limit: '1mb' }))
 
 app.get('/health', async (_req, res) => {
   let engine = null
-  if (useEngine) {
-    try {
-      engine = await fetchJSON(`${engineUrl}/health`)
-    } catch (err) {
-      engine = { ok: false, error: err.message }
-    }
+  try {
+    engine = await fetchJSON(`${engineUrl}/health`)
+  } catch (err) {
+    engine = { ok: false, error: err.message }
   }
   res.json({
     ok: true,
     service: 'insightiq-api',
     gemini: Boolean(geminiKey),
     model: geminiKey ? geminiModel : null,
-    useEngine,
+    engineUrl,
     engine,
     langfuse: langfuseEnabled,
     langfuseBaseUrl: process.env.LANGFUSE_BASE_URL || null,
   })
 })
 
-app.get('/api/alerts', async (_req, res) => {
-  if (!useEngine) return res.json(mockAlerts)
+function alertsGranularityQuery(req) {
+  const g = String(req.query.granularity || 'day').toLowerCase()
+  if (g === 'hour' || g === 'hourly') return 'hour'
+  return 'day'
+}
+
+app.get('/api/alerts', async (req, res) => {
   try {
-    const live = await fetchJSON(`${engineUrl}/alerts`)
-    if (Array.isArray(live) && live.length) return res.json(live)
+    const granularity = alertsGranularityQuery(req)
+    const live = await fetchJSON(`${engineUrl}/alerts?granularity=${encodeURIComponent(granularity)}`)
+    res.json(Array.isArray(live) ? live : [])
   } catch (err) {
-    console.warn('engine alerts failed, using mocks', err.message)
+    console.error('engine alerts failed', err.message)
+    res.status(502).json({ error: 'alerts_unavailable', detail: err.message })
   }
-  res.json(mockAlerts)
 })
 
 app.get('/api/alerts/:alertId', async (req, res) => {
-  const list = useEngine
-    ? await fetchJSON(`${engineUrl}/alerts`).catch(() => mockAlerts)
-    : mockAlerts
-  const alert = (list || []).find((a) => a.id === req.params.alertId) || getMockAlert(req.params.alertId)
-  if (!alert) return res.status(404).json({ error: 'alert_not_found' })
-  res.json(alert)
+  try {
+    const granularity = alertsGranularityQuery(req)
+    const list = await fetchJSON(`${engineUrl}/alerts?granularity=${encodeURIComponent(granularity)}`)
+    const alert = (list || []).find((a) => a.id === req.params.alertId)
+    if (!alert) return res.status(404).json({ error: 'alert_not_found' })
+    res.json(alert)
+  } catch (err) {
+    console.error(err)
+    res.status(502).json({ error: 'alerts_unavailable', detail: err.message })
+  }
 })
 
 app.get('/api/alerts/:alertId/investigation', async (req, res) => {
@@ -84,46 +84,40 @@ app.get('/api/alerts/:alertId/investigation', async (req, res) => {
 app.get('/api/investigations/:investigationId', async (req, res) => {
   const id = req.params.investigationId
   if (invCache.has(id)) return res.json(invCache.get(id))
-  if (useEngine) {
+  try {
+    const inv = await fetchJSON(`${engineUrl}/investigations/${id}`)
+    invCache.set(id, inv)
+    return res.json(inv)
+  } catch (err) {
+    // Engine may 404 on cold cache; rebuild via POST /investigate from id.
     try {
-      const inv = await fetchJSON(`${engineUrl}/investigations/${id}`)
-      invCache.set(id, inv)
-      return res.json(inv)
-    } catch (err) {
-      // Engine may 404 on cold cache; rebuild via POST /investigate from id.
-      try {
-        const body = requestFromInvestigationId(id)
-        if (body) {
-          const inv = await runEngineInvestigate(body)
-          return res.json(inv)
-        }
-      } catch (rebuildErr) {
-        console.warn('investigation rebuild failed', rebuildErr.message || err.message)
+      const body = requestFromInvestigationId(id)
+      if (body) {
+        const inv = await runEngineInvestigate(body)
+        return res.json(inv)
       }
+    } catch (rebuildErr) {
+      console.warn('investigation rebuild failed', rebuildErr.message || err.message)
     }
   }
-  const mock = getMockInvestigation(id)
-  if (!mock) return res.status(404).json({ error: 'investigation_not_found' })
-  res.json(mock)
+  return res.status(404).json({ error: 'investigation_not_found' })
 })
 
 app.get('/api/investigations/:investigationId/export', async (req, res) => {
   const id = req.params.investigationId
   try {
-    if (useEngine) {
-      try {
-        const bundle = await fetchJSON(`${engineUrl}/investigations/${encodeURIComponent(id)}/export`)
-        res.setHeader(
-          'Content-Disposition',
-          `attachment; filename="${id}-unseen-export.json"`,
-        )
-        return res.json(bundle)
-      } catch (err) {
-        console.warn('engine export failed, building locally', err.message)
-      }
+    try {
+      const bundle = await fetchJSON(`${engineUrl}/investigations/${encodeURIComponent(id)}/export`)
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${id}-unseen-export.json"`,
+      )
+      return res.json(bundle)
+    } catch (err) {
+      console.warn('engine export failed, building locally', err.message)
     }
-    let inv = invCache.get(id) || getMockInvestigation(id)
-    if (!inv && useEngine) {
+    let inv = invCache.get(id)
+    if (!inv) {
       const body = requestFromInvestigationId(id)
       if (body) inv = await runEngineInvestigate(body)
     }
@@ -181,25 +175,6 @@ app.post('/api/investigate', async (req, res) => {
 })
 
 app.get('/api/dashboard/meta', async (_req, res) => {
-  if (!useEngine) {
-    return res.json({
-      metrics: [
-        { id: 'revenue', label: 'Revenue' },
-        { id: 'requests', label: 'Requests' },
-        { id: 'fill_rate', label: 'Fill rate' },
-        { id: 'ecpm', label: 'eCPM' },
-        { id: 'ctr', label: 'CTR' },
-      ],
-      dimensions: [
-        { id: 'ad_format', label: 'Ad format' },
-        { id: 'region', label: 'Region' },
-        { id: 'country', label: 'Country' },
-        { id: 'os_version', label: 'OS' },
-        { id: 'campaign_type', label: 'Campaign type' },
-        { id: 'publisher_tier', label: 'Publisher tier' },
-      ],
-    })
-  }
   try {
     res.json(await fetchJSON(`${engineUrl}/dashboard/meta`))
   } catch (err) {
@@ -208,9 +183,6 @@ app.get('/api/dashboard/meta', async (_req, res) => {
 })
 
 app.post('/api/dashboard/query', async (req, res) => {
-  if (!useEngine) {
-    return res.status(503).json({ error: 'engine_required' })
-  }
   try {
     const out = await fetchJSON(`${engineUrl}/dashboard/query`, {
       method: 'POST',
@@ -225,7 +197,6 @@ app.post('/api/dashboard/query', async (req, res) => {
 })
 
 app.get('/api/dashboard/filters', async (req, res) => {
-  if (!useEngine) return res.json({ dimension: req.query.dimension, values: [] })
   try {
     const qs = new URLSearchParams({
       dimension: String(req.query.dimension || ''),
@@ -284,18 +255,26 @@ app.post('/v1/chat/completions', async (req, res) => {
             let mode = 'investigation'
             if (slice) {
               mode = 'dashboard'
-              const dash = await fetchDashboardEvidence(slice)
-              reply = await narrateFromEvidence(content, null, {
-                kind: 'dashboard',
-                label: slice.label,
-                filters: slice.filters,
-                window: dash.window,
-                granularity: dash.granularity,
-                totals: dash.totals,
-                deltas: dash.deltas,
-                breakdown: dash.breakdown,
-                query: dash.query,
-              })
+              try {
+                const dash = await fetchDashboardEvidence(slice, content)
+                reply = await narrateFromEvidence(content, null, {
+                  kind: 'dashboard',
+                  label: slice.label,
+                  filters: slice.filters,
+                  window: dash.window,
+                  granularity: dash.granularity,
+                  totals: dash.totals,
+                  deltas: dash.deltas,
+                  breakdown: dash.breakdown,
+                  query: dash.query,
+                })
+              } catch (err) {
+                reply = [
+                  `I couldn't run a live dashboard query for **${slice.label}**.`,
+                  '',
+                  String(err.message || err),
+                ].join('\n')
+              }
             } else {
               const investigation = await resolveInvestigation(content, {
                 investigationId,
@@ -466,10 +445,10 @@ function detectDashboardIntent(text) {
   if (!Object.keys(filters).length) return null
 
   const filterKeys = Object.keys(filters)
-  const narrow = filterKeys.length > 1 || Boolean(filters.os_version || filters.ad_format || filters.campaign_type || filters.publisher_tier)
+  const narrow =
+    filterKeys.length > 1 ||
+    Boolean(filters.os_version || filters.ad_format || filters.campaign_type || filters.publisher_tier)
 
-  // Match Dashboard default demo day for precise filter questions; keep a week window for broad geo-only asks.
-  const window = narrow ? demoDayWindow() : demoWeekWindow()
   const dimensions = ['ad_format', 'country', 'os_version', 'campaign_type', 'publisher_tier', 'category'].filter(
     (d) => !filters[d],
   )
@@ -478,44 +457,197 @@ function detectDashboardIntent(text) {
     filters,
     label: labels.join(', '),
     dimensions: dimensions.length ? dimensions : ['ad_format'],
-    window,
+    narrow,
     granularity: narrow ? 'hour' : 'day',
   }
 }
 
-function demoWeekWindow() {
+const MONTH_INDEX = {
+  jan: 0,
+  january: 0,
+  feb: 1,
+  february: 1,
+  mar: 2,
+  march: 2,
+  apr: 3,
+  april: 3,
+  may: 4,
+  jun: 5,
+  june: 5,
+  jul: 6,
+  july: 6,
+  aug: 7,
+  august: 7,
+  sep: 8,
+  sept: 8,
+  september: 8,
+  oct: 9,
+  october: 9,
+  nov: 10,
+  november: 10,
+  dec: 11,
+  december: 11,
+}
+
+/** Parse "2026-06-21", "21 June 2026", "June 21, 2026", "21/06/2026" → YYYY-MM-DD. */
+function parseOneDayToken(text) {
+  const q = String(text || '')
+
+  const iso = q.match(/\b(\d{4})-(\d{2})-(\d{2})\b/)
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
+
+  const dmySlash = q.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})\b/)
+  if (dmySlash) {
+    const d = Number(dmySlash[1])
+    const m = Number(dmySlash[2])
+    const y = Number(dmySlash[3])
+    // Prefer D/M/Y when day > 12; otherwise still treat as D/M/Y for hackathon demo locale.
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    }
+  }
+
+  const dMonthY = q.match(
+    /\b(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*(\d{4})\b/i,
+  )
+  if (dMonthY) {
+    const d = Number(dMonthY[1])
+    const m = MONTH_INDEX[dMonthY[2].toLowerCase()]
+    const y = Number(dMonthY[3])
+    if (m != null && d >= 1 && d <= 31) {
+      return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    }
+  }
+
+  const monthDY = q.match(
+    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(\d{4})\b/i,
+  )
+  if (monthDY) {
+    const m = MONTH_INDEX[monthDY[1].toLowerCase()]
+    const d = Number(monthDY[2])
+    const y = Number(monthDY[3])
+    if (m != null && d >= 1 && d <= 31) {
+      return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    }
+  }
+
+  return null
+}
+
+/** Parse absolute or relative date hints from the user question. */
+function parseDateWindowFromText(text) {
+  const q = String(text || '')
+
+  const isoRange = q.match(/(\d{4}-\d{2}-\d{2}).{0,48}?(\d{4}-\d{2}-\d{2})/)
+  if (isoRange) {
+    return windowFromDayBounds(isoRange[1], isoRange[2])
+  }
+
+  // "from 21 June 2026 to 28 June 2026" / "between June 21 and June 28, 2026"
+  const naturalRange = q.match(
+    /\b(?:from|between)\s+(.+?)\s+(?:to|and|through|-)\s+(.+?)(?:\?|$)/i,
+  )
+  if (naturalRange) {
+    const a = parseOneDayToken(naturalRange[1])
+    const b = parseOneDayToken(naturalRange[2])
+    if (a && b) return windowFromDayBounds(a, b)
+  }
+
+  const single = parseOneDayToken(q)
+  if (single) return windowFromDayBounds(single, single)
+
+  if (/\btoday\b|\bthis day\b|\blast day\b|\byesterday\b/i.test(q)) {
+    return { kind: 'day' }
+  }
+  if (/\bthis week\b|\blast\s*7\s*days\b|\bpast week\b|\blast week\b/i.test(q)) {
+    return { kind: 'week' }
+  }
+  return null
+}
+
+function windowFromDayBounds(startDay, endDay) {
+  const start = `${startDay}T00:00:00.000Z`
+  const end = `${endDay}T23:59:59.000Z`
   return {
-    start: '2026-06-15T00:00:00Z',
-    end: '2026-06-21T23:59:59Z',
-    compare: {
-      start: '2026-06-08T00:00:00Z',
-      end: '2026-06-14T23:59:59Z',
-    },
+    start,
+    end,
+    compare: compareWindowFor(start, end),
   }
 }
 
-function demoDayWindow() {
+function compareWindowFor(startISO, endISO) {
+  const start = new Date(startISO)
+  const end = new Date(endISO)
+  const ms = Math.max(end.getTime() - start.getTime(), 0)
+  const cEnd = new Date(start.getTime() - 1000)
+  const cStart = new Date(cEnd.getTime() - ms)
   return {
-    start: '2026-06-21T00:00:00Z',
-    end: '2026-06-21T23:59:59Z',
-    compare: {
-      start: '2026-06-20T00:00:00Z',
-      end: '2026-06-20T23:59:59Z',
-    },
+    start: cStart.toISOString(),
+    end: cEnd.toISOString(),
   }
 }
 
-async function fetchDashboardEvidence(slice) {
+let liveRangeCache = { at: 0, value: null }
+
+async function fetchLiveDataRange() {
+  if (liveRangeCache.value && Date.now() - liveRangeCache.at < 60_000) {
+    return liveRangeCache.value
+  }
+  const meta = await fetchJSON(`${engineUrl}/dashboard/meta`)
+  const range = meta?.dataRange || null
+  liveRangeCache = { at: Date.now(), value: range }
+  return range
+}
+
+/**
+ * Prefer dates mentioned in the question; otherwise use the latest day/week
+ * available in metric_hourly_snapshot.
+ */
+async function resolveChatWindow(text, narrow) {
+  const parsed = parseDateWindowFromText(text)
+  if (parsed?.start && parsed?.end) return parsed
+
+  const kind = parsed?.kind || (narrow ? 'day' : 'week')
+  const range = await fetchLiveDataRange()
+  if (!range?.max) {
+    throw new Error('no snapshot data available to choose a date window')
+  }
+
+  const max = new Date(range.max)
+  const min = range.min ? new Date(range.min) : null
+  const maxDay = new Date(Date.UTC(max.getUTCFullYear(), max.getUTCMonth(), max.getUTCDate()))
+
+  let start
+  let end
+  if (kind === 'day') {
+    start = maxDay
+    end = new Date(maxDay.getTime() + 24 * 3600 * 1000 - 1000)
+  } else {
+    end = new Date(maxDay.getTime() + 24 * 3600 * 1000 - 1000)
+    start = new Date(maxDay.getTime() - 6 * 24 * 3600 * 1000)
+  }
+
+  if (end > max) end = max
+  if (min && start < min) start = min
+
+  return {
+    start: start.toISOString(),
+    end: end.toISOString(),
+    compare: compareWindowFor(start.toISOString(), end.toISOString()),
+  }
+}
+
+async function fetchDashboardEvidence(slice, question = '') {
   return startActiveObservation(
     'retrieve-dashboard-evidence',
     async (obs) => {
-      const window = slice.window || demoDayWindow()
+      const window = await resolveChatWindow(question, Boolean(slice.narrow))
       const body = {
         start: window.start,
         end: window.end,
         compare: window.compare,
-        granularity: slice.granularity || 'hour',
-        metrics: ['revenue', 'requests', 'fill_rate', 'ecpm'],
+        granularity: slice.granularity || (slice.narrow ? 'hour' : 'day'),
+        metrics: ['revenue', 'requests', 'fill_rate', 'ecpm', 'ctr'],
         dimensions: slice.dimensions || ['ad_format'],
         filters: slice.filters,
         limit: 10,
@@ -548,65 +680,57 @@ async function fetchDashboardEvidence(slice) {
 let defaultInvestigationPromise = null
 
 async function getDefaultInvestigation() {
-  if (!useEngine) return mockInvestigations['inv-001']
   if (!defaultInvestigationPromise) {
     defaultInvestigationPromise = (async () => {
-      try {
-        const alerts = await fetchJSON(`${engineUrl}/alerts`)
-        // Prefer an alert that already has category/segment narration (usually adv_0000 demo).
-        const pick =
-          (Array.isArray(alerts) && alerts.find((a) => a.advertiserId === 'adv_0000')) ||
-          (Array.isArray(alerts) && alerts[0])
-        if (pick?.id) {
-          return await runEngineInvestigate({ alertId: pick.id })
-        }
-      } catch (err) {
-        console.warn('default investigation failed', err.message)
+      const alerts = await fetchJSON(`${engineUrl}/alerts`)
+      const pick =
+        (Array.isArray(alerts) && alerts.find((a) => a.advertiserId === 'adv_0000')) ||
+        (Array.isArray(alerts) && alerts[0])
+      if (!pick?.id) {
+        throw new Error('no live alerts available for default investigation')
       }
-      return mockInvestigations['inv-001']
-    })()
+      return await runEngineInvestigate({ alertId: pick.id })
+    })().catch((err) => {
+      defaultInvestigationPromise = null
+      throw err
+    })
   }
   return defaultInvestigationPromise
 }
 
 async function investigationForAlert(alertId) {
-  const mock = getMockInvestigationForAlert(alertId)
-  if (!useEngine) return mock
-
   const uuid = String(alertId || '').replace(/^inv-/i, '')
   const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid)
   if (isUUID) {
-    try {
-      return await runEngineInvestigate({ alertId: uuid })
-    } catch (err) {
-      console.warn('engine investigate failed, mock fallback', err.message)
-      return mock
-    }
+    return await runEngineInvestigate({ alertId: uuid })
   }
 
   // Legacy demo ids: alert-{metric}-{YYYY-MM-DD}
   const dateMatch = alertId.match(/(\d{4}-\d{2}-\d{2})/)
   const metricMatch = alertId.match(/alert-([a-z_]+)-/)
+  const metricAlias = {
+    rev: 'revenue',
+    revenue: 'revenue',
+    fill: 'fill_rate',
+    fill_rate: 'fill_rate',
+    ctr: 'ctr',
+    ecpm: 'ecpm',
+  }
+  if (!dateMatch) {
+    throw new Error(`cannot investigate alert without window: ${alertId}`)
+  }
+  const rawMetric = metricMatch?.[1] || 'revenue'
   const body = {
     alertId,
-    metric: metricMatch?.[1] || mock?.alert?.metric || 'revenue',
-    windowStart: dateMatch ? `${dateMatch[1]}T00:00:00Z` : mock?.alert?.windowStart,
-    windowEnd: dateMatch ? `${dateMatch[1]}T23:59:59Z` : mock?.alert?.windowEnd,
-    baselineKind: mock?.alert?.baselineKind || 'same_hour_4w_seasonality',
+    metric: metricAlias[rawMetric] || rawMetric,
+    windowStart: `${dateMatch[1]}T00:00:00Z`,
+    windowEnd: `${dateMatch[1]}T23:59:59Z`,
+    baselineKind: 'same_hour_4w_seasonality',
   }
-  try {
-    return await runEngineInvestigate(body)
-  } catch (err) {
-    console.warn('engine investigate failed, mock fallback', err.message)
-    return mock
-  }
+  return await runEngineInvestigate(body)
 }
 
 async function runEngineInvestigate(body) {
-  if (!useEngine) {
-    const id = body.alertId || 'alert-rev-2026-06-28'
-    return getMockInvestigationForAlert(id) || mockInvestigations['inv-001']
-  }
   const inv = await fetchJSON(`${engineUrl}/investigate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -646,11 +770,9 @@ async function resolveInvestigation(text, opts = {}) {
   if (investigationId) {
     if (invCache.has(investigationId)) return invCache.get(investigationId)
     try {
-      if (useEngine) {
-        const inv = await fetchJSON(`${engineUrl}/investigations/${investigationId}`)
-        invCache.set(inv.id || investigationId, inv)
-        return inv
-      }
+      const inv = await fetchJSON(`${engineUrl}/investigations/${investigationId}`)
+      invCache.set(inv.id || investigationId, inv)
+      return inv
     } catch {
       /* fall through to rebuild */
     }
@@ -677,8 +799,6 @@ async function resolveInvestigation(text, opts = {}) {
     } catch {
       /* fall through */
     }
-    const mock = getMockInvestigation(id)
-    if (mock) return mock
   }
   const uuidMatch = text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)
   if (uuidMatch) {
@@ -690,21 +810,55 @@ async function resolveInvestigation(text, opts = {}) {
   }
   const alertMatch = text.match(/alert-[a-z0-9-]+/i)
   if (alertMatch) {
-    const inv = await investigationForAlert(alertMatch[0].toLowerCase())
-    if (inv) return inv
+    try {
+      const inv = await investigationForAlert(alertMatch[0].toLowerCase())
+      if (inv) return inv
+    } catch {
+      /* fall through */
+    }
   }
 
   // Free-form RCA questions: reuse one cached default investigation (do not re-run /alerts + investigate each turn).
-  return getDefaultInvestigation()
+  try {
+    return await getDefaultInvestigation()
+  } catch (err) {
+    console.warn('default investigation unavailable', err.message)
+    return null
+  }
+}
+
+function formatHumanDay(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return String(iso).slice(0, 10)
+  return d.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
+function formatHumanWindow(window) {
+  if (!window?.start) return ''
+  const start = formatHumanDay(window.start)
+  const end = formatHumanDay(window.end || window.start)
+  return start === end ? start : `${start} – ${end}`
+}
+
+function roundNice(n, digits = 2) {
+  const x = Number(n)
+  if (!Number.isFinite(x)) return n
+  return Number(x.toFixed(digits))
 }
 
 function fallbackNarration(question, inv, extraEvidence) {
   if (extraEvidence?.kind === 'dashboard' || extraEvidence?.kind === 'geo') {
+    const day = formatHumanWindow(extraEvidence.window)
     const lines = [
-      `Dashboard snapshot for **${extraEvidence.label}** (${extraEvidence.window?.start?.slice(0, 10)} → ${extraEvidence.window?.end?.slice(0, 10)}).`,
-      `Filters: ${JSON.stringify(extraEvidence.filters || {})}`,
+      `For **${extraEvidence.label}** on **${day}**:`,
       '',
-      `Totals: revenue=${extraEvidence.totals?.revenue ?? 'n/a'}, requests=${extraEvidence.totals?.requests ?? 'n/a'}, fill_rate=${extraEvidence.totals?.fill_rate ?? 'n/a'}, ecpm=${extraEvidence.totals?.ecpm ?? 'n/a'}.`,
+      `Revenue **${roundNice(extraEvidence.totals?.revenue)}** · requests ${roundNice(extraEvidence.totals?.requests, 0)} · fill rate ${roundNice((extraEvidence.totals?.fill_rate || 0) * 100, 1)}% · eCPM ${roundNice(extraEvidence.totals?.ecpm)}.`,
     ]
     if (extraEvidence.deltas) {
       lines.push(
@@ -765,8 +919,14 @@ async function narrateFromEvidence(question, inv, extraEvidence = null) {
             kind: extraEvidence.kind,
             label: extraEvidence.label,
             filters: extraEvidence.filters,
-            window: extraEvidence.window,
-            totals: extraEvidence.totals,
+            date: formatHumanWindow(extraEvidence.window),
+            windowISO: extraEvidence.window,
+            totals: {
+              revenue: roundNice(extraEvidence.totals?.revenue),
+              requests: roundNice(extraEvidence.totals?.requests, 0),
+              fill_rate: roundNice(extraEvidence.totals?.fill_rate, 4),
+              ecpm: roundNice(extraEvidence.totals?.ecpm),
+            },
             deltas: extraEvidence.deltas,
           }
         : {
@@ -774,9 +934,12 @@ async function narrateFromEvidence(question, inv, extraEvidence = null) {
             status: inv.status,
             alert: inv.alert,
             decomposition: inv.decomposition,
-            segments: inv.segments,
+            segments: (inv.segments || []).slice(0, 5),
             ruledOut: inv.ruledOut,
-            diagnosis: inv.diagnosis,
+            diagnosis: {
+              text: inv.diagnosis?.text,
+              citations: (inv.diagnosis?.citations || []).slice(0, 6),
+            },
           }
 
       const system = [
@@ -784,9 +947,11 @@ async function narrateFromEvidence(question, inv, extraEvidence = null) {
         'You MUST only use numbers and facts present in the provided evidence JSON.',
         'Never invent metrics, segments, or percentages.',
         isDash
-          ? 'This evidence is a dashboard query result for the exact filters listed. Answer using totals.revenue / totals.requests / etc. for that filter intersection. Do not ignore filters like os_version. Cite the filter set and date window.'
-          : 'This evidence is a root-cause investigation package.',
-        'Keep the answer concise and plain-English for a hackathon demo.',
+          ? 'This evidence is a dashboard query result for the exact filters listed. Answer using totals.revenue / totals.requests / etc. for that filter intersection. Do not ignore filters like os_version.'
+          : 'This evidence is a root-cause investigation package. Summarize diagnosis + top 2-3 segments only.',
+        'Keep the answer to 2-4 short sentences.',
+        'Format dates as human calendar dates (e.g. 21 Jun 2026). Never paste raw ISO timestamps like 2026-06-21T00:00:00.000Z.',
+        'Round revenue to 2 decimals. Do not print floating-point noise.',
       ].join(' ')
 
       const userPrompt = `User question: ${question || 'Explain this investigation.'}\n\nEvidence JSON:\n${JSON.stringify(evidence, null, 2)}`
@@ -855,7 +1020,7 @@ async function fetchJSON(url, options) {
 
 app.listen(port, () => {
   console.log(
-    `InsightIQ API listening on http://localhost:${port} (gemini=${geminiKey ? geminiModel : 'off'}, engine=${useEngine ? engineUrl : 'off'}, langfuse=${langfuseEnabled ? 'on' : 'off'})`,
+    `InsightIQ API listening on http://localhost:${port} (gemini=${geminiKey ? geminiModel : 'off'}, engine=${engineUrl}, langfuse=${langfuseEnabled ? 'on' : 'off'})`,
   )
 })
 

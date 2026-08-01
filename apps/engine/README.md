@@ -1,9 +1,10 @@
 # InsightIQ Go investigation engine
 
-Reads ClickHouse `insightiq` pre-computed tables:
+Reads ClickHouse `insightiq` pre-computed layer:
 
+`ad_events_raw` → MV `mv_hourly` → `agg_hourly` → VIEW `metric_hourly_snapshot`  
 `alerts_live` → `alert_dimension_contributors` / `alert_observations` → evidence JSON  
-(+ `metric_hourly_snapshot` for revenue-identity decomposition)
+(+ `metric_hourly_snapshot` / `agg_hourly` for decomposition + date bounds)
 
 Node/Gemini only narrates this evidence.
 
@@ -34,7 +35,7 @@ Listens on `:4100` by default (`ENGINE_PORT`). Tail logs to verify queries:
 - `GET /health` — ping + `alerts_live` count
 - `POST /investigate` — body `{ alertId }` (UUID from `alerts_live`) or window fields
 - `GET /investigations/:id` — cached / rebuild (`inv-{uuid}`)
-- `GET /alerts` — diversified `alerts_live` wall (fast path; no full investigate)
+- `GET /alerts?granularity=day|hour` — alert wall (default `day` = peak hourly anomaly per advertiser+day; `hour` = native hourly buckets)
 - `GET /dashboard/meta`, `POST /dashboard/query`, `GET /dashboard/filters`
 
 ## Notes

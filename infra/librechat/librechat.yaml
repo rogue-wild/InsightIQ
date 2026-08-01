@@ -3,12 +3,25 @@ version: 1.2.1
 cache: true
 
 interface:
-  customWelcome: "Ask InsightIQ why a metric moved, or query ClickHouse via MCP."
+  customWelcome: "Welcome to InsightIQ — ask why a metric moved, or query ClickHouse via MCP."
+  privacyPolicy:
+    externalUrl: "https://www.inmobi.com"
+    openNewTab: true
+  termsOfService:
+    externalUrl: "https://www.inmobi.com"
+    openNewTab: true
   mcpServers:
     use: true
     share: false
     create: false
     public: false
+  # Keep the UI focused on InsightIQ RCA + MCP
+  modelSelect: true
+  parameters: false
+  sidePanel: true
+  prompts: true
+  bookmarks: false
+  multiConvo: false
 
 endpoints:
   custom:
@@ -22,6 +35,7 @@ endpoints:
       titleConvo: true
       titleModel: "insightiq-rca"
       modelDisplayLabel: "InsightIQ RCA"
+      iconURL: "assets/logo.svg"
       dropParams:
         - "stop"
         - "user"

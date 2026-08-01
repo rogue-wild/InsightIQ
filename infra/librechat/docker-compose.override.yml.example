@@ -1,22 +1,42 @@
-# Example override for LibreChat: InsightIQ YAML + ClickHouse MCP.
-# Copy into your LibreChat folder as docker-compose.override.yml
-# and set CLICKHOUSE_* + CLICKHOUSE_MCP_AUTH_TOKEN in LibreChat .env
+# Mounts InsightIQ config, branding assets, and ClickHouse MCP.
+# Place this file in your LibreChat install as docker-compose.override.yml
+# and keep InsightIQ checked out as a sibling: ../InsightIQ
 services:
   api:
     volumes:
       - type: bind
         source: ./librechat.yaml
         target: /app/librechat.yaml
+      - type: bind
+        source: ../InsightIQ/infra/librechat/assets/favicon-16x16.png
+        target: /app/client/dist/assets/favicon-16x16.png
+      - type: bind
+        source: ../InsightIQ/infra/librechat/assets/favicon-32x32.png
+        target: /app/client/dist/assets/favicon-32x32.png
+      - type: bind
+        source: ../InsightIQ/infra/librechat/assets/apple-touch-icon-180x180.png
+        target: /app/client/dist/assets/apple-touch-icon-180x180.png
+      - type: bind
+        source: ../InsightIQ/infra/librechat/assets/logo.svg
+        target: /app/client/dist/assets/logo.svg
+      - type: bind
+        source: ../InsightIQ/infra/librechat/assets/logo.svg
+        target: /app/client/public/assets/logo.svg
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       - CLICKHOUSE_MCP_AUTH_TOKEN=${CLICKHOUSE_MCP_AUTH_TOKEN}
+      - APP_TITLE=InsightIQ
+      - CUSTOM_FOOTER=InsightIQ · Click-a-thon 2026 · Ask your data why something changed
+      - HELP_AND_FAQ_URL=/
 
   mcp-clickhouse:
     image: mcp/clickhouse
     container_name: mcp-clickhouse
     ports:
       - "8001:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
       - CLICKHOUSE_PORT=${CLICKHOUSE_PORT:-8443}

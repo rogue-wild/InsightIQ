@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,7 +154,13 @@ func main() {
 	mux.HandleFunc("GET /alerts", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		alerts, err := detectAlerts(ctx, conn, cache)
+		granularity := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("granularity")))
+		if granularity != "hour" && granularity != "hourly" {
+			granularity = "day"
+		} else {
+			granularity = "hour"
+		}
+		alerts, err := detectAlerts(ctx, conn, cache, granularity)
 		if err != nil {
 			log.Printf("alerts error: %v", err)
 			http.Error(w, `{"error":"alerts_failed","detail":"`+escape(err.Error())+`"}`, http.StatusInternalServerError)
@@ -162,7 +169,7 @@ func main() {
 		writeJSON(w, alerts)
 	})
 
-	mux.HandleFunc("GET /dashboard/meta", handleDashboardMeta)
+	mux.HandleFunc("GET /dashboard/meta", handleDashboardMeta(conn))
 	mux.HandleFunc("POST /dashboard/query", handleDashboardQuery(conn))
 	mux.HandleFunc("GET /dashboard/filters", handleDashboardFilters(conn))
 

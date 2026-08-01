@@ -62,6 +62,10 @@ const BASELINE_KINDS = {
     label: 'vs same hour, prior 4 weeks',
     hint: 'Compared to the same hour-of-day over the previous 4 weeks (seasonality-aware).',
   },
+  daily_peak_hour: {
+    label: 'daily peak hour',
+    hint: 'Daily card shows the strongest hourly anomaly that day (peak |z-score|), with a full-day window.',
+  },
 }
 
 export function formatBaselineKind(kind) {
@@ -81,7 +85,39 @@ export const ALERT_CATEGORIES = [
   { id: 'campaign_type', label: 'Campaign type' },
   { id: 'ad_format', label: 'Ad format' },
   { id: 'publisher_tier', label: 'Publisher tier' },
+  { id: 'content', label: 'Content', hint: 'App category / vertical (e.g. entertainment)' },
 ]
+
+/** Display helpers when opening an investigation from the Daily alert wall. */
+export function formatAlertViewWindow(alert, view = 'hour') {
+  if (!alert?.windowStart) return ''
+  if (view !== 'day') {
+    return formatWindow(alert.windowStart, alert.windowEnd, { withTime: true })
+  }
+  const start = new Date(alert.windowStart)
+  const dayStart = new Date(
+    Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate(), 0, 0, 0),
+  )
+  const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000 - 1000)
+  const dayLabel = formatWindow(dayStart.toISOString(), dayEnd.toISOString())
+  const peak = start.toLocaleString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'UTC',
+  })
+  return `${dayLabel} · peak hour ${peak} UTC`
+}
+
+export function formatAlertViewBaseline(alert, view = 'hour') {
+  if (view === 'day') {
+    return {
+      label: 'daily peak hour · vs same hour, prior 4 weeks',
+      hint: 'Daily cards pick the strongest hourly anomaly that day. The diagnosis below still uses that peak hour compared to the same hour over the prior 4 weeks.',
+    }
+  }
+  return formatBaselineKind(alert?.baselineKind)
+}
 
 export function categoryLabel(id) {
   return ALERT_CATEGORIES.find((c) => c.id === id)?.label || String(id || '').replaceAll('_', ' ')

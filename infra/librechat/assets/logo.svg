@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 48" fill="none">
+  <rect width="48" height="48" rx="12" fill="#131a24"/>
+  <path d="M10 30 L19 13.5 L25 24 L31 18 L38 30" stroke="#3db8a0" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="31" cy="18" r="2.6" fill="#e85d4c"/>
+  <text x="62" y="31" fill="#e8eef7" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="22" font-weight="650" letter-spacing="-0.4">InsightIQ</text>
+</svg>

@@ -16,12 +16,15 @@ export default function AlertsPage() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [category, setCategory] = useState('all')
+  const [granularity, setGranularity] = useState('day')
 
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
+    setError(null)
     ;(async () => {
       try {
-        const data = await listAlerts()
+        const data = await listAlerts({ granularity })
         if (!cancelled) setAlerts(Array.isArray(data) ? data : [])
       } catch (err) {
         if (!cancelled) setError(err.message || 'Failed to load alerts')
@@ -32,7 +35,7 @@ export default function AlertsPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [granularity])
 
   const counts = useMemo(() => {
     const next = { all: alerts.length }
@@ -48,9 +51,6 @@ export default function AlertsPage() {
     return alerts.filter((a) => (a.categories || []).includes(category))
   }, [alerts, category])
 
-  if (loading) return <div className="loading">Loading alerts…</div>
-  if (error) return <div className="error-box">{error}</div>
-
   return (
     <div>
       <h1 className="page-title">Alerts</h1>
@@ -58,6 +58,32 @@ export default function AlertsPage() {
         Metric moves worth investigating, grouped by where they showed up (geo, OS, campaign,
         format, publisher). Open one for the diagnosis and the numbers behind it.
       </p>
+
+      <div className="alerts-toolbar">
+        <div className="granularity-toggle" role="group" aria-label="Alert granularity">
+          <button
+            type="button"
+            className={`granularity-btn ${granularity === 'day' ? 'is-active' : ''}`}
+            aria-pressed={granularity === 'day'}
+            onClick={() => setGranularity('day')}
+          >
+            Daily
+          </button>
+          <button
+            type="button"
+            className={`granularity-btn ${granularity === 'hour' ? 'is-active' : ''}`}
+            aria-pressed={granularity === 'hour'}
+            onClick={() => setGranularity('hour')}
+          >
+            Hourly
+          </button>
+        </div>
+        <p className="granularity-hint muted">
+          {granularity === 'day'
+            ? 'One card per advertiser per day — peak hourly anomaly that day.'
+            : 'Native hourly buckets from alerts_live.'}
+        </p>
+      </div>
 
       <div className="category-tabs" role="tablist" aria-label="Alert categories">
         {ALERT_CATEGORIES.map((cat) => {
@@ -87,66 +113,76 @@ export default function AlertsPage() {
         </p>
       ) : null}
 
-      <div className="alert-list panel">
-        {filtered.length === 0 ? (
-          <div className="alert-empty muted">No alerts in this category yet.</div>
-        ) : (
-          filtered.map((alert) => (
-            <Link
-              key={alert.id}
-              to={`/investigations/${alert.investigationId}`}
-              className="alert-row"
-            >
-              <div className="alert-main">
-                <div className="alert-title-row">
-                  <span className="alert-metric">{formatMetric(alert.metric)}</span>
-                  <StatusPill status={alert.severity}>{alert.severity}</StatusPill>
-                  <StatusPill status={alert.status}>{alert.status}</StatusPill>
-                  {(alert.categories || []).slice(0, 3).map((c) => (
-                    <span key={c} className={`alert-cat-chip cat-${c}`}>
-                      {categoryLabel(c)}
-                    </span>
-                  ))}
-                </div>
-                <p className="alert-summary">{polishSummary(alert.summary)}</p>
-                {alert.categoryLabels?.length ? (
-                  <div className="alert-segment-tags">
-                    {alert.categoryLabels
-                      .filter((s) => category === 'all' || s.category === category)
-                      .slice(0, 3)
-                      .map((s) => (
-                        <span key={`${s.dimension}-${s.value}`} className="segment-tag mono">
-                          {categoryLabel(s.category)} · {s.value}{' '}
-                          <span className={Number(s.deltaPct) < 0 ? 'neg' : 'pos'}>
-                            {Number(s.deltaPct) > 0 ? '+' : ''}
-                            {Number(s.deltaPct).toFixed(1)}%
-                          </span>
-                        </span>
-                      ))}
+      {loading ? <div className="loading">Loading alerts…</div> : null}
+      {error ? <div className="error-box">{error}</div> : null}
+
+      {!loading && !error ? (
+        <div className="alert-list panel">
+          {filtered.length === 0 ? (
+            <div className="alert-empty muted">No alerts in this category yet.</div>
+          ) : (
+            filtered.map((alert) => (
+              <Link
+                key={`${alert.id}-${alert.granularity || granularity}`}
+                to={`/investigations/${alert.investigationId}?view=${granularity}`}
+                className="alert-row"
+              >
+                <div className="alert-main">
+                  <div className="alert-title-row">
+                    <span className="alert-metric">{formatMetric(alert.metric)}</span>
+                    <StatusPill status={alert.severity}>{alert.severity}</StatusPill>
+                    <StatusPill status={alert.status}>{alert.status}</StatusPill>
+                    <span className="alert-cat-chip">{granularity === 'day' ? 'Daily' : 'Hourly'}</span>
+                    {(alert.categories || []).slice(0, 3).map((c) => (
+                      <span key={c} className={`alert-cat-chip cat-${c}`}>
+                        {categoryLabel(c)}
+                      </span>
+                    ))}
                   </div>
-                ) : null}
-                <div className="alert-meta mono muted">
-                  {alert.advertiserId ? (
-                    <>
-                      <span>{alert.advertiserId}</span>
-                      <span>·</span>
-                    </>
+                  <p className="alert-summary">{polishSummary(alert.summary)}</p>
+                  {alert.categoryLabels?.length ? (
+                    <div className="alert-segment-tags">
+                      {alert.categoryLabels
+                        .filter((s) => category === 'all' || s.category === category)
+                        .slice(0, 3)
+                        .map((s) => (
+                          <span key={`${s.dimension}-${s.value}`} className="segment-tag mono">
+                            {categoryLabel(s.category)} · {s.value}{' '}
+                            <span className={Number(s.deltaPct) < 0 ? 'neg' : 'pos'}>
+                              {Number(s.deltaPct) > 0 ? '+' : ''}
+                              {Number(s.deltaPct).toFixed(1)}%
+                            </span>
+                          </span>
+                        ))}
+                    </div>
                   ) : null}
-                  <span>{formatWindow(alert.windowStart, alert.windowEnd)}</span>
-                  <span>·</span>
-                  <span title={formatBaselineKind(alert.baselineKind).hint}>
-                    {formatBaselineKind(alert.baselineKind).label}
-                  </span>
+                  <div className="alert-meta mono muted">
+                    {alert.advertiserId ? (
+                      <>
+                        <span>{alert.advertiserId}</span>
+                        <span>·</span>
+                      </>
+                    ) : null}
+                    <span>
+                      {formatWindow(alert.windowStart, alert.windowEnd, {
+                        withTime: granularity === 'hour',
+                      })}
+                    </span>
+                    <span>·</span>
+                    <span title={formatBaselineKind(alert.baselineKind).hint}>
+                      {formatBaselineKind(alert.baselineKind).label}
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <div className={`alert-delta ${alert.direction === 'down' ? 'neg' : 'pos'}`}>
-                {alert.direction === 'down' ? '↓' : '↑'}{' '}
-                {Math.abs(alert.pctChange).toFixed(1)}%
-              </div>
-            </Link>
-          ))
-        )}
-      </div>
+                <div className={`alert-delta ${alert.direction === 'down' ? 'neg' : 'pos'}`}>
+                  {alert.direction === 'down' ? '↓' : '↑'}{' '}
+                  {Math.abs(alert.pctChange).toFixed(1)}%
+                </div>
+              </Link>
+            ))
+          )}
+        </div>
+      ) : null}
     </div>
   )
 }
