@@ -2,7 +2,9 @@
 
 ## Overview
 
-InsightIQ detects ad-metric anomalies in ClickHouse, runs deterministic root-cause analysis in a Go engine, and narrates results with an LLM that only sees computed evidence.
+InsightIQ is a low-latency analytics control plane for ad-tech event streams. A **reactive cascade inside ClickHouse** turns raw events into noise-filtered alerts and dimension-level root-cause rows; the Go engine and Node/React apps investigate and narrate that evidence without re-processing the raw firehose.
+
+Native cascade details: [pipeline.md](./pipeline.md).
 
 ```mermaid
 flowchart LR
@@ -27,11 +29,20 @@ flowchart LR
   end
 
   subgraph CH["ClickHouse · insightiq"]
+    Raw[ad_events_raw]
+    Agg[agg_hourly]
+    Base[baseline_hourly]
     Snap[metric_hourly_snapshot]
     AlertsLive[alerts_live]
     Contrib[alert_dimension_contributors]
     Obs[alert_observations]
   end
+
+  Raw --> Agg --> Base
+  Agg --> AlertsLive
+  Base --> AlertsLive
+  AlertsLive --> Contrib --> Obs
+  Agg --> Snap
 
   Dash & Alerts & Inv & Chat --> REST
   Chat --> OAI
@@ -47,21 +58,21 @@ flowchart LR
 
 ### Data plane — ClickHouse (`insightiq`)
 
-Product paths query the pre-aggregated layer only (not `ad_events_raw`):
+Reactive cascade (ingest → aggregate → baseline → alert → attribute → observe) runs **natively** in ClickHouse. Product paths then query the pre-aggregated layer only (not `ad_events_raw`):
 
 | Object | Role |
 |--------|------|
-| `ad_events_raw` | Ingest facts |
+| `ad_events_raw` | High-throughput landing table |
 | `mv_hourly` | Materialized view → `agg_hourly` |
 | `agg_hourly` | Hourly SummingMergeTree rollup |
 | `metric_hourly_snapshot` | VIEW over `agg_hourly` (+ fill_rate, ctr, ecpm, rpr) |
-| `baseline_hourly` | Expected values per advertiser × metric × hour |
-| `alerts_live` | Z-score anomalies |
-| `alert_dimension_contributors` | Segment attribution |
-| `alert_observations` | Ordered observation notes |
+| `baseline_hourly` | 4-week same-hour seasonality expectations |
+| `alerts_live` | Noise-floored Z-score anomalies |
+| `alert_dimension_contributors` | Multi-dimensional segment attribution |
+| `alert_observations` | Plain-language observation rows |
 | `alert_rules` | Detection policy |
 
-Details: [data-model.md](./data-model.md).
+Techniques: seasonality window functions, stddev floor (e.g. `greatest(stddev, 0.05)`), contribution filters. Full write-up: [pipeline.md](./pipeline.md) · schema: [data-model.md](./data-model.md).
 
 ### Investigation engine — Go (`:4100`)
 
@@ -97,7 +108,8 @@ Details: [data-model.md](./data-model.md).
 
 | Principle | Meaning |
 |-----------|---------|
-| Compute near the data | RCA in Go / ClickHouse |
+| Cascade in the database | Aggregation, baseline, anomaly, and first-pass RCA live in ClickHouse |
+| Compute near the data | Further RCA in Go against the view layer |
 | Evidence-bound LLM | Model explains numbers the engine computed |
 | View layer only | Product paths do not scan raw events |
 | Traceability | Investigation `trace`, optional Langfuse, evidence hash |

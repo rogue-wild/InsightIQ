@@ -84,6 +84,21 @@ node scripts/export-investigation.mjs --investigationId=inv-<UUID>
 
 Also available in the Investigation UI as **Export** .
 
+## Verify the ClickHouse cascade
+
+With the `insightiq` schema loaded, sanity-check observations and alert volume:
+
+```sql
+SELECT title, detail, impact
+FROM insightiq.alert_observations
+ORDER BY abs(impact) DESC
+LIMIT 5;
+
+SELECT count() FROM insightiq.alerts_live WHERE abs(zscore) > 3;
+```
+
+Full cascade, techniques, and glossary: [pipeline.md](./pipeline.md).
+
 ## Troubleshooting
 
 | Symptom | Likely cause |

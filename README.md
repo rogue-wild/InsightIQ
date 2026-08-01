@@ -1,8 +1,14 @@
 # InsightIQ
 
-ClickHouse-native analytics control plane: detect metric anomalies, isolate root causes, and narrate evidence-backed answers in plain English.
+ClickHouse-native anomaly detection and automated root-cause analysis for large-scale ad-tech event streams. A reactive cascade inside ClickHouse turns raw events into noise-filtered alerts with dimension-level attribution; the app layer investigates and narrates that evidence in plain English.
 
-**Documentation:** [docs/README.md](docs/README.md)
+**Documentation:** [docs/README.md](docs/README.md) · **Native pipeline:** [docs/pipeline.md](docs/pipeline.md)
+
+## Why it matters
+
+Traditional observability often pays high compute/egress costs and suffers alert fatigue from low-volume noise. InsightIQ keeps aggregation, seasonality baselines, Z-score detection, and first-pass multi-dimensional attribution **inside ClickHouse**, then surfaces only high-significance incidents to the UI.
+
+In the reference dataset, noise flooring concentrates signal from a large candidate set into hundreds of critical revenue anomalies (e.g. on the order of **~92k → ~388** alerts) with segment-level contribution mapping.
 
 ## Quick start
 
@@ -34,10 +40,21 @@ See [docs/setup.md](docs/setup.md) for ClickHouse, Gemini, and Langfuse configur
 
 ## Capabilities
 
-1. **Detect** — z-score alerts from `alerts_live` (daily or hourly wall)
-2. **Investigate** — baseline, metric tree, segments, seasonality, counterfactual
-3. **Narrate** — LLM explains engine evidence only
-4. **Export** — investigation bundle with trace and evidence hash
+1. **Detect** — seasonality-aware, noise-floored Z-score alerts from `alerts_live` (daily or hourly wall)
+2. **Attribute** — multi-dimensional contributors + plain-language `alert_observations` computed in ClickHouse
+3. **Investigate** — baseline, metric tree, segments, seasonality, counterfactual (Go engine)
+4. **Narrate** — LLM explains engine evidence only
+5. **Export** — investigation bundle with trace and evidence hash
+
+## Core techniques (ClickHouse)
+
+| Technique | Summary |
+|-----------|---------|
+| Seasonality baseline | Same hour / day-of-week over prior ~4 weeks |
+| Noise-floored Z-score | e.g. `greatest(stddev, 0.05)` so penny moves do not explode |
+| Multi-dim RCA | Concurrent contribution across geo, OS, format, content, tier, campaign |
+
+Details and SQL patterns: [docs/pipeline.md](docs/pipeline.md).
 
 ## Repository
 
@@ -55,8 +72,9 @@ scripts/           Investigation export CLI
 | Doc | Description |
 |-----|-------------|
 | [docs/architecture.md](docs/architecture.md) | System design |
+| [docs/pipeline.md](docs/pipeline.md) | Native ClickHouse cascade |
 | [docs/setup.md](docs/setup.md) | Local setup |
-| [docs/data-model.md](docs/data-model.md) | ClickHouse schema |
+| [docs/data-model.md](docs/data-model.md) | Schema & engines |
 | [docs/api-reference.md](docs/api-reference.md) | HTTP APIs |
 | [docs/product-guide.md](docs/product-guide.md) | UI behavior |
 
