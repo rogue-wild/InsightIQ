@@ -1,0 +1,23 @@
+services:
+  api:
+    image: ghcr.io/danny-avila/librechat-dev:latest
+    container_name: adinsight-librechat
+    ports:
+      - "3080:3080"
+    env_file:
+      - .env
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - mongodb
+
+  mongodb:
+    image: mongo:7
+    container_name: adinsight-librechat-mongo
+    volumes:
+      - librechat_mongo:/data/db
+
+volumes:
+  librechat_mongo:

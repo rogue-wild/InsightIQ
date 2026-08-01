@@ -1,0 +1,25 @@
+# AdInsight custom endpoint — LibreChat talks to the Node API as an OpenAI-compatible provider.
+# Analysis stays deterministic in AdInsight; the model only narrates evidence JSON.
+version: 1.2.1
+cache: true
+
+interface:
+  customWelcome: "Ask AdInsight why a metric moved. Answers cite investigation evidence only."
+
+endpoints:
+  custom:
+    - name: "AdInsight"
+      apiKey: "adinsight-local"
+      baseURL: "http://host.docker.internal:4000/v1/"
+      models:
+        default:
+          - "adinsight-rca"
+        fetch: false
+      titleConvo: true
+      titleModel: "adinsight-rca"
+      modelDisplayLabel: "AdInsight RCA"
+      dropParams:
+        - "stop"
+        - "user"
+        - "frequency_penalty"
+        - "presence_penalty"
