@@ -5,15 +5,46 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/joho/godotenv"
 )
 
+func loadEngineEnv() error {
+	if explicit := os.Getenv("INSIGHTIQ_ENGINE_ENV"); explicit != "" {
+		return godotenv.Overload(explicit)
+	}
+	if wd, err := os.Getwd(); err == nil {
+		dir := wd
+		for i := 0; i < 8; i++ {
+			engineEnv := filepath.Join(dir, "apps", "engine", ".env")
+			if _, err := os.Stat(engineEnv); err == nil {
+				return godotenv.Overload(engineEnv)
+			}
+			if filepath.Base(dir) == "engine" {
+				local := filepath.Join(dir, ".env")
+				if _, err := os.Stat(local); err == nil {
+					return godotenv.Overload(local)
+				}
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	return nil
+}
+
 func main() {
-	_ = godotenv.Overload()
-	port := envOr("PORT", "4100")
+	// Load apps/engine/.env when present so a foreign cwd (e.g. apps/api) cannot
+	// override listen port via another service's PORT=.
+	_ = loadEngineEnv()
+	port := envOr("ENGINE_PORT", "4100")
 
 	conn, err := openClickHouse()
 	if err != nil {
@@ -84,8 +115,43 @@ func main() {
 		writeJSON(w, inv)
 	})
 
+	mux.HandleFunc("GET /investigations/{id}/export", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		inv := cache.get(id)
+		if inv == nil {
+			req, err := requestFromInvestigationID(id)
+			if err != nil {
+				http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+			defer cancel()
+			built, err := runInvestigation(ctx, conn, req)
+			if err != nil {
+				http.Error(w, `{"error":"investigate_failed","detail":"`+escape(err.Error())+`"}`, http.StatusInternalServerError)
+				return
+			}
+			cache.put(built)
+			inv = built
+		}
+		bundle := map[string]any{
+			"exportedAt":     time.Now().UTC().Format(time.RFC3339),
+			"purpose":        "unseen-incident-submission",
+			"investigation":  inv,
+			"immutableTrace": inv.Trace,
+			"evidenceHash":   inv.Evidence.Hash,
+			"evidence":       inv.Evidence,
+			"seasonality":    inv.Seasonality,
+			"waterfall":      inv.Waterfall,
+			"counterfactual": inv.Counterfactual,
+			"hypotheses":     inv.Hypotheses,
+		}
+		w.Header().Set("Content-Disposition", `attachment; filename="`+inv.ID+`-unseen-export.json"`)
+		writeJSON(w, bundle)
+	})
+
 	mux.HandleFunc("GET /alerts", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 180*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 		alerts, err := detectAlerts(ctx, conn, cache)
 		if err != nil {
@@ -96,9 +162,14 @@ func main() {
 		writeJSON(w, alerts)
 	})
 
+	mux.HandleFunc("GET /dashboard/meta", handleDashboardMeta)
+	mux.HandleFunc("POST /dashboard/query", handleDashboardQuery(conn))
+	mux.HandleFunc("GET /dashboard/filters", handleDashboardFilters(conn))
+
 	addr := ":" + port
 	log.Printf("InsightIQ engine listening on http://localhost%s", addr)
-	if err := http.ListenAndServe(addr, withCORS(mux)); err != nil {
+	handler := withCORS(withRequestContext(mux))
+	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Fatal(err)
 	}
 }

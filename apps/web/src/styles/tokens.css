@@ -77,6 +77,7 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
   padding: 0.9rem 1.5rem;
   border-bottom: 1px solid var(--border);
   background: rgba(12, 17, 24, 0.85);
@@ -87,6 +88,17 @@ select {
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.brand-mark {
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.brand-text {
   display: flex;
   align-items: baseline;
   gap: 0.65rem;
@@ -103,6 +115,37 @@ select {
   font-size: 0.8rem;
 }
 
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.nav-link {
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+  transition:
+    color 160ms ease,
+    background 160ms ease,
+    border-color 160ms ease;
+}
+
+.nav-link:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.nav-link.is-active {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: rgba(61, 184, 160, 0.35);
+}
+
 .header-meta {
   display: flex;
   align-items: center;
@@ -114,9 +157,13 @@ select {
 
 .app-main {
   flex: 1;
-  width: min(1200px, 100%);
+  width: min(1280px, 100%);
   margin: 0 auto;
   padding: 1.5rem 1.25rem 3rem;
+}
+
+.app-main:has(.dashboard-page) {
+  width: min(1440px, 100%);
 }
 
 .page-title {

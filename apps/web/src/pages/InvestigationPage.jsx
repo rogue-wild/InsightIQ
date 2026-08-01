@@ -1,19 +1,23 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getInvestigation } from '../api/client.js'
+import { exportInvestigationBundle, getInvestigation } from '../api/client.js'
 import AskInChatButton from '../components/AskInChatButton.jsx'
+import CounterfactualCard from '../components/CounterfactualCard.jsx'
 import DiagnosisCard from '../components/DiagnosisCard.jsx'
+import HypothesesPanel from '../components/HypothesesPanel.jsx'
 import MetricTree from '../components/MetricTree.jsx'
+import SeasonalityPanel from '../components/SeasonalityPanel.jsx'
 import SegmentTable from '../components/SegmentTable.jsx'
 import StatusPill from '../components/StatusPill.jsx'
 import TraceTimeline from '../components/TraceTimeline.jsx'
-import { formatMetric, formatWindow } from '../utils/format.js'
+import { formatBaselineKind, formatMetric, formatWindow } from '../utils/format.js'
 
 export default function InvestigationPage() {
   const { investigationId } = useParams()
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -34,19 +38,62 @@ export default function InvestigationPage() {
     }
   }, [investigationId])
 
+  async function onExport() {
+    if (!data?.id || exporting) return
+    setExporting(true)
+    try {
+      const bundle = await exportInvestigationBundle(data.id)
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${data.id}-unseen-export.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err.message || 'Export failed')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   if (loading) return <div className="loading">Running investigation…</div>
-  if (error) return <div className="error-box">{error}</div>
+  if (error && !data) return <div className="error-box">{error}</div>
   if (!data) return null
 
-  const { alert, decomposition, segments, ruledOut, diagnosis, trace } = data
+  const {
+    alert,
+    decomposition,
+    segments,
+    ruledOut = [],
+    diagnosis,
+    trace,
+    seasonality,
+    waterfall = [],
+    counterfactual,
+    hypotheses = [],
+    evidence,
+  } = data
 
   return (
     <div className="investigation">
       <div className="inv-nav">
-        <Link to="/" className="back-link muted">
+        <Link to="/alerts" className="back-link muted">
           ← Alerts
         </Link>
+        <div className="inv-nav-actions">
+          <button type="button" className="btn" onClick={onExport} disabled={exporting}>
+            {exporting ? 'Exporting…' : 'Export unseen bundle'}
+          </button>
+          <AskInChatButton
+            alertId={alert.id}
+            investigationId={data.id}
+            question={`Why did ${formatMetric(alert.metric)} move ${alert.pctChange}% on ${alert.windowStart.slice(0, 10)}? Use investigation ${data.id}.`}
+          />
+        </div>
       </div>
+
+      {error ? <div className="error-box">{error}</div> : null}
 
       <header className="inv-header panel fade-in">
         <div>
@@ -61,14 +108,14 @@ export default function InvestigationPage() {
           <p className="inv-window mono muted">
             {formatWindow(alert.windowStart, alert.windowEnd, { withTime: true })}
           </p>
-          <p className="muted" style={{ margin: '0.35rem 0 0' }}>
-            Baseline: {alert.baselineKind.replaceAll('_', ' ')}
+          <p
+            className="muted"
+            style={{ margin: '0.35rem 0 0' }}
+            title={formatBaselineKind(alert.baselineKind).hint}
+          >
+            Compared {formatBaselineKind(alert.baselineKind).label}
           </p>
         </div>
-        <AskInChatButton
-          alertId={alert.id}
-          question={`Why did ${formatMetric(alert.metric)} move ${alert.pctChange}% on ${alert.windowStart.slice(0, 10)}? Use investigation ${data.id}.`}
-        />
       </header>
 
       <div className="grid-2" style={{ marginTop: '1rem' }}>
@@ -76,11 +123,11 @@ export default function InvestigationPage() {
           <div className="panel-header">
             <h2 className="panel-title">Metric tree</h2>
             <span className="muted" style={{ fontSize: '0.8rem' }}>
-              Revenue identity walk
+              Identity walk + $ contribution
             </span>
           </div>
           <div className="panel-body">
-            <MetricTree decomposition={decomposition} />
+            <MetricTree decomposition={decomposition} waterfall={waterfall} />
           </div>
         </section>
 
@@ -89,7 +136,9 @@ export default function InvestigationPage() {
             <h2 className="panel-title">Diagnosis</h2>
           </div>
           <div className="panel-body">
-            <DiagnosisCard diagnosis={diagnosis} />
+            <DiagnosisCard diagnosis={diagnosis} evidence={evidence} />
+            <CounterfactualCard counterfactual={counterfactual} />
+            <HypothesesPanel hypotheses={hypotheses} />
           </div>
         </section>
       </div>
@@ -105,6 +154,15 @@ export default function InvestigationPage() {
         </section>
 
         <div className="grid-stack">
+          <section className="panel">
+            <div className="panel-header">
+              <h2 className="panel-title">Seasonality</h2>
+            </div>
+            <div className="panel-body">
+              <SeasonalityPanel seasonality={seasonality} />
+            </div>
+          </section>
+
           <section className="panel">
             <div className="panel-header">
               <h2 className="panel-title">Ruled out</h2>

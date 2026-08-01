@@ -1,38 +1,22 @@
-export default function AskInChatButton({ alertId, question }) {
-  const base = (import.meta.env.VITE_LIBRECHAT_URL || '').replace(/\/$/, '')
-  const enabled = Boolean(base)
-  const endpoint = import.meta.env.VITE_LIBRECHAT_ENDPOINT || 'InsightIQ'
-  const model = import.meta.env.VITE_LIBRECHAT_MODEL || 'insightiq-rca'
+import { useNavigate } from 'react-router-dom'
 
+export default function AskInChatButton({ alertId, investigationId, question }) {
+  const navigate = useNavigate()
   const prompt =
     question ||
-    `What else could explain alert ${alertId}? Use get_investigation and only cite evidence numbers.`
+    `What else could explain alert ${alertId}? Use investigation evidence and only cite numbers from the package.`
 
-  const href = enabled
-    ? `${base}/c/new?${new URLSearchParams({
-        endpoint,
-        model,
-        prompt,
-        submit: 'true',
-      }).toString()}`
-    : undefined
-
-  if (!enabled) {
-    return (
-      <button
-        type="button"
-        className="btn"
-        disabled
-        title="Set VITE_LIBRECHAT_URL to enable LibreChat follow-ups"
-      >
-        Ask in chat
-      </button>
-    )
+  function openChat() {
+    const params = new URLSearchParams()
+    params.set('q', prompt)
+    if (investigationId) params.set('investigationId', investigationId)
+    if (alertId) params.set('alertId', alertId)
+    navigate(`/chat?${params.toString()}`)
   }
 
   return (
-    <a className="btn btn-primary" href={href} target="_blank" rel="noreferrer">
+    <button type="button" className="btn btn-primary" onClick={openChat}>
       Ask in chat
-    </a>
+    </button>
   )
 }

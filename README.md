@@ -17,14 +17,14 @@ cd apps/engine && go run .
 # Node API
 cd apps/api && npm run dev
 
-# Dashboard
+# Dashboard + in-app chat
 cd apps/web && npm run dev
 ```
 
 - Engine: http://localhost:4100  
 - API: http://localhost:4000  
-- Web: http://localhost:5173  
-- LibreChat: http://localhost:3080 (Ask in chat)
+- Web: http://localhost:5173 (`/dashboard` analytics, `/chat` RCA chat)  
+- LibreChat (white-labeled InsightIQ + MCP): http://localhost:3080
 
 Set `VITE_LIBRECHAT_URL=http://localhost:3080` and optionally `VITE_USE_MOCK=false` + `VITE_API_URL=http://localhost:4000` in `apps/web/.env`.
 
@@ -55,3 +55,17 @@ See [infra/clickhouse/insightiq_view_layer.sql](infra/clickhouse/insightiq_view_
 ## Contract
 
 See [packages/contracts/investigation.schema.json](packages/contracts/investigation.schema.json).
+
+## Unseen-incident export
+
+From an investigation in the UI: **Export unseen bundle**.
+
+Or CLI:
+
+```bash
+node scripts/export-unseen.mjs --alertId=<uuid> --out=./unseen-out
+# or
+node scripts/export-unseen.mjs --investigationId=inv-<uuid>
+```
+
+Writes `{id}-unseen-export.json` with diagnosis, immutable trace, evidence SHA-256, seasonality, waterfall, counterfactual, and hypotheses.

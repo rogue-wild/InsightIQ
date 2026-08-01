@@ -13,6 +13,14 @@ export const alerts = [
     investigationId: 'inv-001',
     status: 'complete',
     summary: 'Revenue drop localized to rewarded ads on Android 15 in India',
+    categories: ['geo', 'os', 'ad_format', 'publisher_tier'],
+    primaryCategory: 'geo',
+    categoryLabels: [
+      { category: 'ad_format', dimension: 'ad_format', value: 'rewarded', deltaPct: -30.9, contributionPct: 61.2 },
+      { category: 'os', dimension: 'os_version', value: 'Android 15', deltaPct: -28.4, contributionPct: 48.7 },
+      { category: 'geo', dimension: 'country', value: 'IN', deltaPct: -26.1, contributionPct: 42.3 },
+      { category: 'publisher_tier', dimension: 'publisher_tier', value: 'tier_2', deltaPct: -12.4, contributionPct: 19.8 },
+    ],
   },
   {
     id: 'alert-fill-2026-06-21',
@@ -26,6 +34,13 @@ export const alerts = [
     investigationId: 'inv-002',
     status: 'complete',
     summary: 'Fill-rate dip concentrated in LATAM interstitial inventory',
+    categories: ['geo', 'ad_format', 'campaign_type'],
+    primaryCategory: 'geo',
+    categoryLabels: [
+      { category: 'geo', dimension: 'region', value: 'LATAM', deltaPct: -18.2, contributionPct: 55.0 },
+      { category: 'ad_format', dimension: 'ad_format', value: 'interstitial', deltaPct: -15.1, contributionPct: 41.0 },
+      { category: 'campaign_type', dimension: 'campaign_type', value: 'CPI', deltaPct: -9.4, contributionPct: 22.0 },
+    ],
   },
   {
     id: 'alert-rev-2026-06-14',
@@ -39,6 +54,12 @@ export const alerts = [
     investigationId: 'inv-003',
     status: 'complete',
     summary: 'Weekend seasonality — ruled out as anomaly',
+    categories: ['campaign_type', 'publisher_tier'],
+    primaryCategory: 'campaign_type',
+    categoryLabels: [
+      { category: 'campaign_type', dimension: 'campaign_type', value: 'CPM', deltaPct: -4.2, contributionPct: 38.0 },
+      { category: 'publisher_tier', dimension: 'publisher_tier', value: 'tier_1', deltaPct: -3.1, contributionPct: 24.0 },
+    ],
   },
   {
     id: 'alert-ctr-2026-07-02',
@@ -52,6 +73,12 @@ export const alerts = [
     investigationId: 'inv-004',
     status: 'running',
     summary: 'CTR spike under investigation',
+    categories: ['os', 'ad_format'],
+    primaryCategory: 'os',
+    categoryLabels: [
+      { category: 'os', dimension: 'os_version', value: 'iOS 18', deltaPct: 14.2, contributionPct: 52.0 },
+      { category: 'ad_format', dimension: 'ad_format', value: 'banner', deltaPct: 9.8, contributionPct: 31.0 },
+    ],
   },
 ]
 

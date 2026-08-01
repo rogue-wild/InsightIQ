@@ -59,14 +59,19 @@ type TraceStep struct {
 }
 
 type Investigation struct {
-	ID            string      `json:"id"`
-	Status        string      `json:"status"`
-	Alert         Alert       `json:"alert"`
-	Decomposition []Factor    `json:"decomposition"`
-	Segments      []Segment   `json:"segments"`
-	RuledOut      []RuledOut  `json:"ruledOut"`
-	Diagnosis     Diagnosis   `json:"diagnosis"`
-	Trace         []TraceStep `json:"trace"`
+	ID             string           `json:"id"`
+	Status         string           `json:"status"`
+	Alert          Alert            `json:"alert"`
+	Decomposition  []Factor         `json:"decomposition"`
+	Segments       []Segment        `json:"segments"`
+	RuledOut       []RuledOut       `json:"ruledOut"`
+	Diagnosis      Diagnosis        `json:"diagnosis"`
+	Trace          []TraceStep      `json:"trace"`
+	Seasonality    SeasonalityCheck `json:"seasonality"`
+	Waterfall      []WaterfallStep  `json:"waterfall"`
+	Counterfactual Counterfactual   `json:"counterfactual"`
+	Hypotheses     []Hypothesis     `json:"hypotheses"`
+	Evidence       EvidenceLock     `json:"evidence"`
 }
 
 type metricBag struct {
@@ -188,7 +193,13 @@ func runInvestigation(ctx context.Context, conn *chClient, req InvestigateReques
 	if live != nil && metric == "revenue" && live.Expected > 0 && baseline.Revenue == 0 {
 		baseline.Revenue = live.Expected
 	}
-	mark("baseline", fmt.Sprintf("metric_hourly_snapshot vs %s", baselineKind), t1)
+	flatStart := windowStart.Add(-24 * time.Hour)
+	flatEnd := windowEnd.Add(-24 * time.Hour)
+	flat, err := querySnapshotMetrics(ctx, conn, advertiserID, flatStart, flatEnd)
+	if err != nil {
+		flat = metricBag{}
+	}
+	mark("baseline", fmt.Sprintf("metric_hourly_snapshot vs %s (+ flat prior-day check)", baselineKind), t1)
 
 	t2 := time.Now()
 	decomp := decompose(baseline, observed)
@@ -207,7 +218,13 @@ func runInvestigation(ctx context.Context, conn *chClient, req InvestigateReques
 		}
 		mark("slice", fmt.Sprintf("Ranked dimensions from metric_hourly_snapshot (%d)", len(segments)), t3)
 	} else {
-		mark("slice", fmt.Sprintf("Loaded alert_dimension_contributors (%d)", len(segments)), t3)
+		// Enrich with wall categories (region, campaign_type, publisher_tier, …)
+		// when ClickHouse contributors only cover a subset of dimensions.
+		extra, err := rankSegmentsFromSnapshot(ctx, conn, advertiserID, windowStart, windowEnd, culprit)
+		if err == nil {
+			segments = mergeSegments(segments, extra, 8)
+		}
+		mark("slice", fmt.Sprintf("Loaded contributors + snapshot dims (%d)", len(segments)), t3)
 	}
 
 	t4 := time.Now()
@@ -237,16 +254,34 @@ func runInvestigation(ctx context.Context, conn *chClient, req InvestigateReques
 	if err != nil {
 		return nil, fmt.Errorf("observations: %w", err)
 	}
+
+	tSeas := time.Now()
+	seasonality := evaluateSeasonality(metric, observed, baseline, flat, pct)
+	mark("seasonality", seasonality.Detail, tSeas)
+
 	ruledOut := buildRuledOut(culprit, baseline, observed, pct)
+	ruledOut = enrichRuledOutWithSeasonality(ruledOut, seasonality, culprit, baseline, observed, pct)
+	waterfall := buildWaterfall(baseline, observed, decomp)
+	counterfactual := buildCounterfactual(culprit, baseline, observed)
+	hypotheses := buildHypotheses(decomp, culprit, segments)
 	diagnosis := buildDiagnosisFromInsightIQ(alert, decomp, culprit, segments, ruledOut, observations, live)
-	mark("evidence", "Packaged evidence from InsightIQ view layer", t4)
+	diagnosis = appendCounterfactualCitation(diagnosis, counterfactual)
+	mark("evidence", "Packaged evidence + waterfall + counterfactual + hypotheses", t4)
 	trace = append(trace, TraceStep{Step: "narrate", Detail: "Narration deferred to Node/Gemini from evidence only", DurationMs: 0})
 
-	return &Investigation{
+	inv := &Investigation{
 		ID: invID, Status: "complete", Alert: alert,
 		Decomposition: decomp, Segments: segments, RuledOut: ruledOut,
 		Diagnosis: diagnosis, Trace: trace,
-	}, nil
+		Seasonality: seasonality, Waterfall: waterfall,
+		Counterfactual: counterfactual, Hypotheses: hypotheses,
+	}
+	if seasonality.Status == "ruled_out_as_seasonality" {
+		inv.Alert.Severity = "low"
+		inv.Diagnosis.Text = "Seasonality trap: " + seasonality.Detail + " " + inv.Diagnosis.Text
+	}
+	inv.Evidence = buildEvidenceLock(inv)
+	return inv, nil
 }
 
 func normalizeAlertID(id string) string {
@@ -663,12 +698,6 @@ func buildRuledOut(culprit string, base, obs metricBag, revenuePct float64) []Ru
 			Detail: fmt.Sprintf("CTR %.1f%%; not a direct revenue factor in the CPM identity.", pctChange(obs.CTR(), base.CTR())),
 		})
 	}
-	if math.Abs(revenuePct) >= 5 {
-		out = append(out, RuledOut{
-			Reason: "Seasonality check",
-			Detail: "Same hour-of-week / 4-week InsightIQ baseline applied; residual movement remains.",
-		})
-	}
 	return out
 }
 
@@ -963,47 +992,417 @@ func requestFromInvestigationID(id string) (InvestigateRequest, error) {
 	}, nil
 }
 
-func detectAlerts(ctx context.Context, conn *chClient, cache *invCache) ([]map[string]any, error) {
-	// Prefer alerts that already have ClickHouse-native observations (demo-ready RCA).
-	q := `
-		SELECT
-			toString(a.alert_id) AS id,
-			a.advertiser_id,
-			a.metric,
-			toString(a.bucket) AS bucket,
-			a.actual,
-			a.expected,
-			a.zscore,
-			count(o.alert_id) AS obs_n
-		FROM alerts_live AS a
-		LEFT JOIN alert_observations AS o ON o.alert_id = a.alert_id
-		WHERE abs(a.zscore) > 3
-		GROUP BY a.alert_id, a.advertiser_id, a.metric, a.bucket, a.actual, a.expected, a.zscore
-		ORDER BY obs_n DESC, abs(a.zscore) DESC
-		LIMIT 12
-	`
-	rows, err := conn.QueryMaps(ctx, q)
+// Alert wall categories exposed to the UI.
+var alertCategoryOrder = []string{"geo", "os", "campaign_type", "ad_format", "publisher_tier"}
+
+func categoryForDimension(dim string) string {
+	switch strings.ToLower(dim) {
+	case "country", "region":
+		return "geo"
+	case "os_version", "os":
+		return "os"
+	case "campaign_type":
+		return "campaign_type"
+	case "ad_format":
+		return "ad_format"
+	case "publisher_tier":
+		return "publisher_tier"
+	default:
+		return ""
+	}
+}
+
+func categorizeSegments(segments []Segment) (categories []string, primary string, labels []map[string]any) {
+	seen := map[string]bool{}
+	bestByCat := map[string]Segment{}
+	for _, s := range segments {
+		cat := categoryForDimension(s.Dimension)
+		if cat == "" {
+			continue
+		}
+		seen[cat] = true
+		prev, ok := bestByCat[cat]
+		if !ok || math.Abs(s.ContributionPct) > math.Abs(prev.ContributionPct) {
+			bestByCat[cat] = s
+		}
+	}
+	ordered := make([]string, 0, len(seen))
+	for _, c := range alertCategoryOrder {
+		if seen[c] {
+			ordered = append(ordered, c)
+		}
+	}
+	if len(ordered) > 0 {
+		primary = ordered[0]
+	}
+	for _, c := range ordered {
+		s := bestByCat[c]
+		labels = append(labels, map[string]any{
+			"category": c,
+			"dimension": s.Dimension,
+			"value": s.Value,
+			"deltaPct": s.DeltaPct,
+			"contributionPct": s.ContributionPct,
+		})
+	}
+	return ordered, primary, labels
+}
+
+func mergeSegments(primary, extra []Segment, limit int) []Segment {
+	seen := map[string]bool{}
+	out := make([]Segment, 0, limit)
+	key := func(s Segment) string { return s.Dimension + "|" + s.Value }
+	for _, s := range primary {
+		k := key(s)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, s)
+	}
+	for _, s := range extra {
+		if categoryForDimension(s.Dimension) == "" {
+			continue
+		}
+		k := key(s)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, s)
+		if len(out) >= limit {
+			break
+		}
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+type alertListRow struct {
+	AlertID      string
+	AdvertiserID string
+	Metric       string
+	Bucket       time.Time
+	Actual       float64
+	Expected     float64
+	ZScore       float64
+}
+
+// detectAlerts builds the alert wall from alerts_live + contributors.
+// It intentionally does NOT run full investigations (those happen on open).
+// Only adv_0000 currently has alert_observations rows; preferring those
+// previously collapsed the wall to a single advertiser and made /alerts slow.
+func detectAlerts(ctx context.Context, conn *chClient, _ *invCache) ([]map[string]any, error) {
+	rows, err := selectAlertListRows(ctx, conn, 28)
 	if err != nil {
 		return nil, err
+	}
+	if len(rows) == 0 {
+		return []map[string]any{}, nil
+	}
+
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.AlertID)
+	}
+	segsByAlert, err := fetchContributorsBatch(ctx, conn, ids, 8)
+	if err != nil {
+		return nil, err
+	}
+	obsByAlert, err := fetchObservationDetailsBatch(ctx, conn, ids, 3)
+	if err != nil {
+		// Observations are optional enrichment; don't fail the wall.
+		obsByAlert = map[string][]string{}
 	}
 
 	out := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {
-		alertID := asString(r["id"])
-		inv, err := runInvestigation(ctx, conn, InvestigateRequest{AlertID: alertID})
-		if err != nil {
+		pct := 0.0
+		if r.Expected != 0 {
+			pct = (r.Actual - r.Expected) / math.Abs(r.Expected) * 100
+		}
+		direction := "down"
+		if pct > 0 {
+			direction = "up"
+		}
+		metric := r.Metric
+		if metric == "" {
+			metric = "revenue"
+		}
+		segments := segsByAlert[r.AlertID]
+		for i := range segments {
+			if segments[i].Metric == "" {
+				segments[i].Metric = metric
+			}
+		}
+		categories, primary, labels := categorizeSegments(segments)
+		live := &alertLiveRow{
+			AlertID: r.AlertID, AdvertiserID: r.AdvertiserID, Metric: metric,
+			Bucket: r.Bucket, Actual: r.Actual, Expected: r.Expected, ZScore: r.ZScore,
+		}
+		windowStart := r.Bucket.UTC()
+		windowEnd := r.Bucket.Add(time.Hour - time.Second).UTC()
+		summary := buildAlertListSummary(r.AdvertiserID, metric, direction, pct, segments, obsByAlert[r.AlertID])
+		item := map[string]any{
+			"id": r.AlertID, "metric": metric, "direction": direction,
+			"pctChange": round1(pct),
+			"windowStart": windowStart.Format(time.RFC3339),
+			"windowEnd":   windowEnd.Format(time.RFC3339),
+			"baselineKind": "same_hour_4w_seasonality",
+			"severity":     severityFromZOrPct(live, math.Abs(pct)),
+			"advertiserId": r.AdvertiserID,
+			"investigationId": "inv-" + r.AlertID,
+			"status":          "complete",
+			"summary":         summary,
+			"categories":      categories,
+			"primaryCategory": primary,
+			"categoryLabels":  labels,
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func buildAlertListSummary(advertiserID, metric, direction string, pct float64, segments []Segment, obs []string) string {
+	head := fmt.Sprintf("%s %s %s", humanMetric(metric), direction, formatPct(math.Abs(pct)))
+	if advertiserID != "" {
+		head = fmt.Sprintf("%s for %s %s %s", humanMetric(metric), advertiserID, direction, formatPct(math.Abs(pct)))
+	}
+	if len(obs) > 0 {
+		return head + ". " + strings.Join(obs, " ")
+	}
+	if len(segments) == 0 {
+		return head + "."
+	}
+	parts := make([]string, 0, 3)
+	for i, s := range segments {
+		if i >= 3 {
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s %s (%s)",
+			humanDimension(s.Dimension), s.Value, formatSignedPct(s.DeltaPct)))
+	}
+	return head + ". Top segments: " + strings.Join(parts, "; ") + "."
+}
+
+func selectAlertListRows(ctx context.Context, conn *chClient, limit int) ([]alertListRow, error) {
+	if limit <= 0 {
+		limit = 24
+	}
+	seen := map[string]bool{}
+	out := make([]alertListRow, 0, limit)
+
+	appendRows := func(rows []map[string]any) {
+		for _, r := range rows {
+			id := asString(r["id"])
+			if id == "" || seen[id] {
+				continue
+			}
+			bucket, err := parseCHTime(asString(r["bucket"]))
+			if err != nil {
+				continue
+			}
+			seen[id] = true
+			out = append(out, alertListRow{
+				AlertID: id, AdvertiserID: asString(r["advertiser_id"]),
+				Metric: asString(r["metric"]), Bucket: bucket,
+				Actual: asFloat(r["actual"]), Expected: asFloat(r["expected"]), ZScore: asFloat(r["zscore"]),
+			})
+			if len(out) >= limit {
+				return
+			}
+		}
+	}
+
+	// 1) Alerts that already have dimension contributors / observations (richer summaries + categories).
+	// Today this is mostly adv_0000 in the demo dataset.
+	richLimit := limit / 3
+	if richLimit < 6 {
+		richLimit = 6
+	}
+	if richLimit > limit {
+		richLimit = limit
+	}
+	rich, err := conn.QueryMaps(ctx, fmt.Sprintf(`
+		SELECT
+			toString(a.alert_id) AS id,
+			a.advertiser_id AS advertiser_id,
+			a.metric AS metric,
+			toString(a.bucket) AS bucket,
+			a.actual AS actual,
+			a.expected AS expected,
+			a.zscore AS zscore
+		FROM alerts_live AS a
+		WHERE abs(a.zscore) > 3
+		  AND (
+			a.alert_id IN (SELECT DISTINCT alert_id FROM alert_dimension_contributors)
+			OR a.alert_id IN (SELECT DISTINCT alert_id FROM alert_observations)
+		  )
+		ORDER BY abs(a.zscore) DESC
+		LIMIT %d
+	`, richLimit))
+	if err != nil {
+		return nil, err
+	}
+	appendRows(rich)
+	if len(out) >= limit {
+		return out, nil
+	}
+
+	// 2) Fill the rest with the strongest alert per remaining advertiser so the wall
+	// covers many accounts (not only the pre-narrated demo advertiser).
+	exclude := make([]string, 0, len(out))
+	for _, r := range out {
+		if r.AdvertiserID != "" {
+			exclude = append(exclude, quoteString(r.AdvertiserID))
+		}
+	}
+	excludeClause := ""
+	if len(exclude) > 0 {
+		excludeClause = " AND advertiser_id NOT IN (" + strings.Join(exclude, ",") + ")"
+	}
+	diverse, err := conn.QueryMaps(ctx, fmt.Sprintf(`
+		SELECT
+			toString(alert_id) AS id,
+			advertiser_id,
+			metric,
+			toString(bucket) AS bucket,
+			actual,
+			expected,
+			zscore
+		FROM (
+			SELECT
+				alert_id,
+				advertiser_id,
+				metric,
+				bucket,
+				actual,
+				expected,
+				zscore,
+				row_number() OVER (PARTITION BY advertiser_id ORDER BY abs(zscore) DESC) AS rn
+			FROM alerts_live
+			WHERE abs(zscore) > 3%s
+		)
+		WHERE rn = 1
+		ORDER BY abs(zscore) DESC
+		LIMIT %d
+	`, excludeClause, limit-len(out)))
+	if err != nil {
+		return nil, err
+	}
+	appendRows(diverse)
+	return out, nil
+}
+
+func fetchContributorsBatch(ctx context.Context, conn *chClient, alertIDs []string, perAlert int) (map[string][]Segment, error) {
+	out := map[string][]Segment{}
+	if len(alertIDs) == 0 {
+		return out, nil
+	}
+	if perAlert <= 0 {
+		perAlert = 8
+	}
+	quoted := make([]string, 0, len(alertIDs))
+	for _, id := range alertIDs {
+		if !looksLikeUUID(id) {
 			continue
 		}
-		if cache != nil {
-			cache.put(inv)
+		quoted = append(quoted, "toUUID("+quoteString(id)+")")
+	}
+	if len(quoted) == 0 {
+		return out, nil
+	}
+	q := fmt.Sprintf(`
+		SELECT
+			toString(alert_id) AS alert_id,
+			dimension,
+			dimension_value,
+			current_value,
+			baseline_value,
+			delta,
+			contribution
+		FROM (
+			SELECT
+				alert_id,
+				dimension,
+				dimension_value,
+				current_value,
+				baseline_value,
+				delta,
+				contribution,
+				row_number() OVER (PARTITION BY alert_id ORDER BY abs(delta) DESC) AS rn
+			FROM alert_dimension_contributors
+			WHERE alert_id IN (%s)
+		)
+		WHERE rn <= %d
+		ORDER BY alert_id, abs(delta) DESC
+	`, strings.Join(quoted, ","), perAlert)
+	rows, err := conn.QueryMaps(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		id := asString(r["alert_id"])
+		base := asFloat(r["baseline_value"])
+		cur := asFloat(r["current_value"])
+		contrib := asFloat(r["contribution"])
+		if math.Abs(contrib) <= 1.5 {
+			contrib *= 100
 		}
-		out = append(out, map[string]any{
-			"id": inv.Alert.ID, "metric": inv.Alert.Metric, "direction": inv.Alert.Direction,
-			"pctChange": inv.Alert.PctChange, "windowStart": inv.Alert.WindowStart, "windowEnd": inv.Alert.WindowEnd,
-			"baselineKind": inv.Alert.BaselineKind, "severity": inv.Alert.Severity,
-			"advertiserId": inv.Alert.AdvertiserID,
-			"investigationId": inv.ID, "status": inv.Status, "summary": inv.Diagnosis.Text,
+		out[id] = append(out[id], Segment{
+			Dimension: asString(r["dimension"]), Value: asString(r["dimension_value"]),
+			DeltaPct: round1(pctChange(cur, base)), ContributionPct: round1(contrib),
 		})
+	}
+	return out, nil
+}
+
+func fetchObservationDetailsBatch(ctx context.Context, conn *chClient, alertIDs []string, perAlert int) (map[string][]string, error) {
+	out := map[string][]string{}
+	if len(alertIDs) == 0 {
+		return out, nil
+	}
+	if perAlert <= 0 {
+		perAlert = 3
+	}
+	quoted := make([]string, 0, len(alertIDs))
+	for _, id := range alertIDs {
+		if !looksLikeUUID(id) {
+			continue
+		}
+		quoted = append(quoted, "toUUID("+quoteString(id)+")")
+	}
+	if len(quoted) == 0 {
+		return out, nil
+	}
+	q := fmt.Sprintf(`
+		SELECT
+			toString(alert_id) AS alert_id,
+			detail
+		FROM (
+			SELECT
+				alert_id,
+				detail,
+				row_number() OVER (PARTITION BY alert_id ORDER BY observation_order ASC) AS rn
+			FROM alert_observations
+			WHERE alert_id IN (%s)
+		)
+		WHERE rn <= %d
+		ORDER BY alert_id, rn
+	`, strings.Join(quoted, ","), perAlert)
+	rows, err := conn.QueryMaps(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		id := asString(r["alert_id"])
+		detail := strings.TrimSpace(asString(r["detail"]))
+		if detail == "" {
+			continue
+		}
+		out[id] = append(out[id], detail)
 	}
 	return out, nil
 }

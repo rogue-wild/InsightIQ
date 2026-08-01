@@ -12,6 +12,9 @@ Node/Gemini only narrates this evidence.
 Copy `.env.example` → `.env` (gitignored) with ClickHouse Cloud settings.
 Set `CLICKHOUSE_DATABASE=insightiq`.
 
+Every HTTP request logs the ClickHouse SQL it runs (tagged `req#N METHOD /path`).
+Disable with `CLICKHOUSE_LOG_QUERIES=false`.
+
 ## Run
 
 ```bash
@@ -20,14 +23,19 @@ go run .
 go build -o bin/engine . && ./bin/engine
 ```
 
-Listens on `:4100` by default.
+Listens on `:4100` by default (`ENGINE_PORT`). Tail logs to verify queries:
+
+```bash
+./bin/engine 2>&1 | tee /tmp/insightiq-engine.log
+```
 
 ## Endpoints
 
 - `GET /health` — ping + `alerts_live` count
 - `POST /investigate` — body `{ alertId }` (UUID from `alerts_live`) or window fields
 - `GET /investigations/:id` — cached / rebuild (`inv-{uuid}`)
-- `GET /alerts` — top `alerts_live` rows (prefers those with observations)
+- `GET /alerts` — diversified `alerts_live` wall (fast path; no full investigate)
+- `GET /dashboard/meta`, `POST /dashboard/query`, `GET /dashboard/filters`
 
 ## Notes
 

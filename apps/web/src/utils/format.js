@@ -43,6 +43,50 @@ export function formatMetric(metric) {
   return labels[metric] || metric.replaceAll('_', ' ')
 }
 
+/**
+ * Human labels for how “expected” was computed.
+ * - same weekday: compare this Saturday to prior Saturdays (avoids weekend false alarms)
+ * - trailing 7d: compare to the average of the last 7 days
+ * - same hour 4w: compare this hour to the same hour over the prior 4 weeks
+ */
+const BASELINE_KINDS = {
+  same_weekday_trailing: {
+    label: 'vs prior same weekdays',
+    hint: 'Compared to the same weekday in recent weeks (e.g. this Saturday vs prior Saturdays), so normal weekend softness is not treated as an incident.',
+  },
+  trailing_7d: {
+    label: 'vs last 7 days',
+    hint: 'Compared to the average of the trailing 7 calendar days.',
+  },
+  same_hour_4w_seasonality: {
+    label: 'vs same hour, prior 4 weeks',
+    hint: 'Compared to the same hour-of-day over the previous 4 weeks (seasonality-aware).',
+  },
+}
+
+export function formatBaselineKind(kind) {
+  if (!kind) return { label: 'baseline', hint: '' }
+  const key = String(kind)
+  if (BASELINE_KINDS[key]) return BASELINE_KINDS[key]
+  return {
+    label: key.replaceAll('_', ' '),
+    hint: 'How the expected/baseline value was computed for this alert.',
+  }
+}
+
+export const ALERT_CATEGORIES = [
+  { id: 'all', label: 'All' },
+  { id: 'geo', label: 'Geo', hint: 'Region and country' },
+  { id: 'os', label: 'OS', hint: 'OS version' },
+  { id: 'campaign_type', label: 'Campaign type' },
+  { id: 'ad_format', label: 'Ad format' },
+  { id: 'publisher_tier', label: 'Publisher tier' },
+]
+
+export function categoryLabel(id) {
+  return ALERT_CATEGORIES.find((c) => c.id === id)?.label || String(id || '').replaceAll('_', ' ')
+}
+
 export function formatSignedPct(value) {
   const n = Number(value) || 0
   const sign = n > 0 ? '+' : ''

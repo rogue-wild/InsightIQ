@@ -8,6 +8,8 @@ apps/api/node_modules/
 apps/web/node_modules/
 infra/librechat/.env
 apps/engine/.env
+apps/api/.env
+apps/web/.env
 apps/engine/bin/
 .cursor/
 /LibreChat/
