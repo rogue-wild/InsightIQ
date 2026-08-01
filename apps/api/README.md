@@ -1,4 +1,4 @@
-# AdInsight Node API
+# InsightIQ Node API
 
 REST + LibreChat OpenAI-compatible chat. Proxies investigations to the Go engine and narrates evidence with Gemini.
 

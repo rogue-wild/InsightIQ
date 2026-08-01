@@ -1,12 +1,20 @@
 export default function AskInChatButton({ alertId, question }) {
   const base = (import.meta.env.VITE_LIBRECHAT_URL || '').replace(/\/$/, '')
   const enabled = Boolean(base)
+  const endpoint = import.meta.env.VITE_LIBRECHAT_ENDPOINT || 'InsightIQ'
+  const model = import.meta.env.VITE_LIBRECHAT_MODEL || 'insightiq-rca'
+
+  const prompt =
+    question ||
+    `What else could explain alert ${alertId}? Use get_investigation and only cite evidence numbers.`
 
   const href = enabled
-    ? `${base}/?q=${encodeURIComponent(
-        question ||
-          `What else could explain alert ${alertId}? Use get_investigation and only cite evidence numbers.`,
-      )}&alertId=${encodeURIComponent(alertId || '')}`
+    ? `${base}/c/new?${new URLSearchParams({
+        endpoint,
+        model,
+        prompt,
+        submit: 'true',
+      }).toString()}`
     : undefined
 
   if (!enabled) {

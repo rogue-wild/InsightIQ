@@ -1,4 +1,4 @@
-module github.com/geospot/adinsight/engine
+module github.com/geospot/insightiq/engine
 
 go 1.22
 

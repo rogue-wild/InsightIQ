@@ -25,7 +25,7 @@ func openClickHouse() (*chClient, error) {
 	port := envOr("CLICKHOUSE_PORT", "8443")
 	user := envOr("CLICKHOUSE_USER", "default")
 	password := os.Getenv("CLICKHOUSE_PASSWORD")
-	database := envOr("CLICKHOUSE_DATABASE", "adinsight")
+	database := envOr("CLICKHOUSE_DATABASE", "insightiq")
 	secure := envOr("CLICKHOUSE_SECURE", "true") == "true"
 
 	scheme := "https"
@@ -170,4 +170,8 @@ func envOr(key, fallback string) string {
 
 func quoteTime(t time.Time) string {
 	return "'" + t.UTC().Format("2006-01-02 15:04:05") + "'"
+}
+
+func quoteString(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "\\'") + "'"
 }

@@ -32,7 +32,7 @@ app.get('/health', async (_req, res) => {
   }
   res.json({
     ok: true,
-    service: 'adinsight-api',
+    service: 'insightiq-api',
     gemini: Boolean(geminiKey),
     model: geminiKey ? geminiModel : null,
     useEngine,
@@ -110,7 +110,7 @@ app.post('/api/investigate', async (req, res) => {
 app.get('/v1/models', (_req, res) => {
   res.json({
     object: 'list',
-    data: [{ id: 'adinsight-rca', object: 'model', owned_by: 'adinsight' }],
+    data: [{ id: 'insightiq-rca', object: 'model', owned_by: 'insightiq' }],
   })
 })
 
@@ -126,7 +126,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       id: `chatcmpl-${Date.now()}`,
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
-      model: req.body?.model || 'adinsight-rca',
+      model: req.body?.model || 'insightiq-rca',
       choices: [
         {
           index: 0,
@@ -174,7 +174,18 @@ async function investigationForAlert(alertId) {
   const mock = getMockInvestigationForAlert(alertId)
   if (!useEngine) return mock
 
-  // Prefer engine investigation using alert window when we can parse it.
+  const uuid = String(alertId || '').replace(/^inv-/i, '')
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid)
+  if (isUUID) {
+    try {
+      return await runEngineInvestigate({ alertId: uuid })
+    } catch (err) {
+      console.warn('engine investigate failed, mock fallback', err.message)
+      return mock
+    }
+  }
+
+  // Legacy demo ids: alert-{metric}-{YYYY-MM-DD}
   const dateMatch = alertId.match(/(\d{4}-\d{2}-\d{2})/)
   const metricMatch = alertId.match(/alert-([a-z_]+)-/)
   const body = {
@@ -182,7 +193,7 @@ async function investigationForAlert(alertId) {
     metric: metricMatch?.[1] || mock?.alert?.metric || 'revenue',
     windowStart: dateMatch ? `${dateMatch[1]}T00:00:00Z` : mock?.alert?.windowStart,
     windowEnd: dateMatch ? `${dateMatch[1]}T23:59:59Z` : mock?.alert?.windowEnd,
-    baselineKind: mock?.alert?.baselineKind || 'same_weekday_trailing',
+    baselineKind: mock?.alert?.baselineKind || 'same_hour_4w_seasonality',
   }
   try {
     return await runEngineInvestigate(body)
@@ -206,9 +217,14 @@ async function runEngineInvestigate(body) {
   return inv
 }
 
-/** Parse inv-{metric}-{YYYYMMDD} into an investigate request body. */
+/** Parse inv-{uuid} or inv-{metric}-{YYYYMMDD} into an investigate request body. */
 function requestFromInvestigationId(id) {
-  const m = String(id || '').match(/^inv-(.+)-(\d{8})$/)
+  const raw = String(id || '')
+  const uuid = raw.replace(/^inv-/i, '')
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid)) {
+    return { alertId: uuid }
+  }
+  const m = raw.match(/^inv-(.+)-(\d{8})$/)
   if (!m) return null
   const metric = m[1]
   const y = m[2].slice(0, 4)
@@ -220,35 +236,47 @@ function requestFromInvestigationId(id) {
     metric,
     windowStart: `${day}T00:00:00Z`,
     windowEnd: `${day}T23:59:59Z`,
-    baselineKind: 'same_weekday_trailing',
+    baselineKind: 'same_hour_4w_seasonality',
   }
 }
 
 async function resolveInvestigation(text) {
-  const invMatch = text.match(/inv-[a-z0-9-]+/i)
+  const invMatch = text.match(/inv-[0-9a-f-]{36}|inv-[a-z0-9-]+/i)
   if (invMatch) {
     const id = invMatch[0]
     if (invCache.has(id)) return invCache.get(id)
+    try {
+      const body = requestFromInvestigationId(id)
+      if (body) return await runEngineInvestigate(body)
+    } catch {
+      /* fall through */
+    }
     const mock = getMockInvestigation(id)
     if (mock) return mock
+  }
+  const uuidMatch = text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)
+  if (uuidMatch) {
+    try {
+      return await runEngineInvestigate({ alertId: uuidMatch[0] })
+    } catch {
+      /* fall through */
+    }
   }
   const alertMatch = text.match(/alert-[a-z0-9-]+/i)
   if (alertMatch) {
     const inv = await investigationForAlert(alertMatch[0].toLowerCase())
     if (inv) return inv
   }
-  // Default live investigation for a known demo day
+  // Default: first InsightIQ alert with observations (engine /alerts prefers those)
   try {
-    return await runEngineInvestigate({
-      metric: 'revenue',
-      windowStart: '2026-06-28T00:00:00Z',
-      windowEnd: '2026-06-28T23:59:59Z',
-      baselineKind: 'same_weekday_trailing',
-      alertId: 'alert-rev-2026-06-28',
-    })
+    const alerts = await fetchJSON(`${engineUrl}/alerts`)
+    if (Array.isArray(alerts) && alerts[0]?.id) {
+      return await runEngineInvestigate({ alertId: alerts[0].id })
+    }
   } catch {
-    return mockInvestigations['inv-001']
+    /* fall through */
   }
+  return mockInvestigations['inv-001']
 }
 
 function fallbackNarration(question, inv) {
@@ -293,7 +321,7 @@ async function narrateFromEvidence(question, inv) {
   }
 
   const system = [
-    'You are AdInsight, an automated root-cause analyst narrator.',
+    'You are InsightIQ, an automated root-cause analyst narrator.',
     'You MUST only use numbers and facts present in the provided evidence JSON.',
     'Never invent metrics, segments, or percentages.',
     'Keep the answer concise and plain-English for a hackathon demo.',
@@ -333,6 +361,6 @@ async function fetchJSON(url, options) {
 
 app.listen(port, () => {
   console.log(
-    `AdInsight API listening on http://localhost:${port} (gemini=${geminiKey ? geminiModel : 'off'}, engine=${useEngine ? engineUrl : 'off'})`,
+    `InsightIQ API listening on http://localhost:${port} (gemini=${geminiKey ? geminiModel : 'off'}, engine=${useEngine ? engineUrl : 'off'})`,
   )
 })

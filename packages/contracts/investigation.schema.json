@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://adinsight.local/contracts/investigation.schema.json",
+  "$id": "https://insightiq.local/contracts/investigation.schema.json",
   "title": "Investigation",
   "description": "Evidence payload shared by the React dashboard, Node API, Go engine, and LibreChat tools.",
   "type": "object",

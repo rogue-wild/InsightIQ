@@ -1,11 +1,11 @@
-# AdInsight
+# InsightIQ
 
-Automated root-cause analyst for the Click-a-thon 2026 InMobi problem: detect metric moves, drill down in ClickHouse, and narrate an evidence-backed diagnosis.
+ClickHouse-native autonomous analytics control plane: detect metric anomalies, isolate root causes, and narrate verified answers in plain English.
 
 ## Current status
 
 - React dashboard (mock or live API)
-- Go investigation engine on ClickHouse Cloud (9M events loaded)
+- Go investigation engine on ClickHouse Cloud (`insightiq` view layer)
 - Node API proxy + Gemini narration + LibreChat `/v1` endpoint
 
 ## Run
@@ -39,9 +39,18 @@ infra/librechat/
 data/           ad_events.csv + dimension tables
 ```
 
-## ClickHouse
+## ClickHouse (InsightIQ)
 
-Database `adinsight` with `ad_events`, `apps`, `advertisers`, `geo_device`. Credentials live in gitignored `apps/engine/.env` and `apps/api/.env`.
+Database `insightiq` — autonomous analytics control plane:
+
+- `ad_events_raw` → `agg_hourly` → `metric_hourly_snapshot`
+- `baseline_hourly` + z-score → `alerts_live`
+- RCA: `alert_dimension_contributors`, `alert_observations`
+
+Engine + MCP read the pre-computed view layer only (never scan raw events for UI/chat).
+Credentials live in gitignored `apps/engine/.env` and `apps/api/.env`.
+
+See [infra/clickhouse/insightiq_view_layer.sql](infra/clickhouse/insightiq_view_layer.sql).
 
 ## Contract
 

@@ -8,8 +8,8 @@ export default function App() {
     <div className="app-shell">
       <header className="app-header">
         <NavLink to="/" className="brand">
-          <span className="brand-name">AdInsight</span>
-          <span className="brand-tag">Automated root-cause analyst</span>
+          <span className="brand-name">InsightIQ</span>
+          <span className="brand-tag">Ask your data why something changed</span>
         </NavLink>
         <div className="header-meta">
           <span>{isMockMode() ? 'mock data' : 'live api'}</span>

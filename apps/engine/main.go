@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load()
+	_ = godotenv.Overload()
 	port := envOr("PORT", "4100")
 
 	conn, err := openClickHouse()
@@ -20,7 +20,7 @@ func main() {
 		log.Fatalf("clickhouse: %v", err)
 	}
 	defer conn.Close()
-	log.Printf("connected to ClickHouse database=%s", envOr("CLICKHOUSE_DATABASE", "adinsight"))
+	log.Printf("connected to ClickHouse database=%s", envOr("CLICKHOUSE_DATABASE", "insightiq"))
 
 	cache := &invCache{byID: map[string]*Investigation{}}
 
@@ -28,15 +28,16 @@ func main() {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
-		rows, err := conn.QueryMaps(ctx, `SELECT count() AS n FROM ad_events`)
+		rows, err := conn.QueryMaps(ctx, `SELECT count() AS n FROM alerts_live`)
 		n := 0.0
 		if err == nil && len(rows) > 0 {
 			n = asFloat(rows[0]["n"])
 		}
 		writeJSON(w, map[string]any{
 			"ok":      err == nil,
-			"service": "adinsight-engine",
-			"events":  n,
+			"service": "insightiq-engine",
+			"database": envOr("CLICKHOUSE_DATABASE", "insightiq"),
+			"alerts":  n,
 			"error":   errString(err),
 		})
 	})
@@ -96,7 +97,7 @@ func main() {
 	})
 
 	addr := ":" + port
-	log.Printf("AdInsight engine listening on http://localhost%s", addr)
+	log.Printf("InsightIQ engine listening on http://localhost%s", addr)
 	if err := http.ListenAndServe(addr, withCORS(mux)); err != nil {
 		log.Fatal(err)
 	}

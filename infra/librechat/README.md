@@ -1,36 +1,44 @@
-# LibreChat for AdInsight
+# LibreChat for InsightIQ
 
-Your running LibreChat install lives at `/Users/geospot/Developer/LibreChat` (port **3080**).
+Your running LibreChat install: `/Users/geospot/Developer/LibreChat` (port **3080**).
 
-AdInsight wires into it as a **custom OpenAI-compatible endpoint** backed by the Node API on port **4000**.
+## ClickHouse MCP (wired)
 
-## Already configured
+LibreChat talks to a `mcp-clickhouse` Docker service that queries your **ClickHouse Cloud** `insightiq` database.
 
-1. [`LibreChat/librechat.yaml`](/Users/geospot/Developer/LibreChat/librechat.yaml) — `AdInsight` endpoint → `http://host.docker.internal:4000/v1/`
-2. [`LibreChat/docker-compose.override.yml`](/Users/geospot/Developer/LibreChat/docker-compose.override.yml) — mounts that YAML into the container
-3. `apps/web/.env` — `VITE_LIBRECHAT_URL=http://localhost:3080` enables **Ask in chat**
-
-## Run checklist
-
-```bash
-# Terminal 1 — AdInsight API (must be up for chat answers)
-cd /Users/geospot/Developer/AdInsight/apps/api && npm run dev
-
-# Terminal 2 — dashboard
-cd /Users/geospot/Developer/AdInsight/apps/web && npm run dev
-
-# LibreChat (already dockerized)
-cd /Users/geospot/Developer/LibreChat && docker compose up -d
-```
-
-1. Open http://localhost:5173 → open an investigation → **Ask in chat**
-2. Or open http://localhost:3080 directly, pick endpoint **AdInsight** / model **adinsight-rca**
-3. Try: `Why did revenue drop? Use inv-001`
-
-## Smoke test from inside Docker
+1. Ensure LibreChat `.env` has:
+   - `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`
+   - `CLICKHOUSE_DATABASE=insightiq`
+   - `CLICKHOUSE_MCP_AUTH_TOKEN=<random secret>`
+2. `librechat.yaml` includes `mcpServers.clickhouse-insightiq` (SSE) + InsightIQ custom endpoint
+3. Restart:
 
 ```bash
-docker exec LibreChat wget -qO- http://host.docker.internal:4000/health
+cd /Users/geospot/Developer/LibreChat
+docker compose up -d
 ```
 
-If that fails, restart with host gateway: `extra_hosts: ["host.docker.internal:host-gateway"]` (already in the stock compose).
+4. Open http://localhost:3080 → select MCP **clickhouse-insightiq**
+5. Try: `List databases` or `SELECT count() FROM insightiq.alerts_live`
+
+Also keep InsightIQ Node on `:4000` if you use the **InsightIQ** custom chat endpoint.
+
+## Smoke test MCP health
+
+```bash
+curl -s http://localhost:8001/health
+```
+
+Should return `OK` when MCP can reach ClickHouse Cloud.
+
+## Preferred MCP tables
+
+Use the pre-computed view layer only:
+
+- `alerts_live`
+- `alert_observations`
+- `alert_dimension_contributors`
+- `metric_hourly_snapshot` / `agg_hourly`
+- `baseline_hourly`
+
+Do not query `ad_events_raw` from chat.

@@ -1,25 +1,59 @@
-# AdInsight custom endpoint — LibreChat talks to the Node API as an OpenAI-compatible provider.
-# Analysis stays deterministic in AdInsight; the model only narrates evidence JSON.
+# InsightIQ custom endpoint + ClickHouse MCP for LibreChat
 version: 1.2.1
 cache: true
 
 interface:
-  customWelcome: "Ask AdInsight why a metric moved. Answers cite investigation evidence only."
+  customWelcome: "Ask InsightIQ why a metric moved, or query ClickHouse via MCP."
+  mcpServers:
+    use: true
+    share: false
+    create: false
+    public: false
 
 endpoints:
   custom:
-    - name: "AdInsight"
-      apiKey: "adinsight-local"
+    - name: "InsightIQ"
+      apiKey: "insightiq-local"
       baseURL: "http://host.docker.internal:4000/v1/"
       models:
         default:
-          - "adinsight-rca"
+          - "insightiq-rca"
         fetch: false
       titleConvo: true
-      titleModel: "adinsight-rca"
-      modelDisplayLabel: "AdInsight RCA"
+      titleModel: "insightiq-rca"
+      modelDisplayLabel: "InsightIQ RCA"
       dropParams:
         - "stop"
         - "user"
         - "frequency_penalty"
         - "presence_penalty"
+
+mcpSettings:
+  allowedAddresses:
+    - "mcp-clickhouse:8000"
+    - "host.docker.internal:8001"
+
+mcpServers:
+  clickhouse-insightiq:
+    type: sse
+    url: http://mcp-clickhouse:8000/sse
+    headers:
+      Authorization: "Bearer ${CLICKHOUSE_MCP_AUTH_TOKEN}"
+    timeout: 60000
+    serverInstructions: >
+      You are connected to the InsightIQ ClickHouse analytics control plane.
+      Prefer database insightiq. Never scan ad_events_raw for dashboards or chat —
+      use the pre-computed view layer only.
+
+      Core tables:
+      - alerts_live (alert_id, advertiser_id, metric, bucket, actual, expected, zscore)
+      - alert_dimension_contributors (alert_id, dimension, dimension_value, delta, contribution)
+      - alert_observations (alert_id, title, detail, impact, observation_order)
+      - metric_hourly_snapshot / agg_hourly (hourly rollups with joined dims)
+      - baseline_hourly (4-week same hour-of-week seasonality)
+
+      When asked why something changed, read alert_observations and
+      alert_dimension_contributors for that alert_id. Narrate deterministic numbers only.
+      Use read-only SQL. Compute ratios as sum/sum (never avg of ratios).
+      Revenue identity: Requests × Fill rate × Render rate × eCPM / 1000.
+      Do not invent numbers — only cite query results.

@@ -52,6 +52,12 @@ export default function AlertsPage() {
               </div>
               <p className="alert-summary">{polishSummary(alert.summary)}</p>
               <div className="alert-meta mono muted">
+                {alert.advertiserId ? (
+                  <>
+                    <span>{alert.advertiserId}</span>
+                    <span>·</span>
+                  </>
+                ) : null}
                 <span>{formatWindow(alert.windowStart, alert.windowEnd)}</span>
                 <span>·</span>
                 <span>{alert.baselineKind.replaceAll('_', ' ')}</span>
