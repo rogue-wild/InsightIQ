@@ -34,7 +34,10 @@ Suggested demo path (matches InMobi guidelines): Alerts → open a revenue drop 
 
 ## Demo Video
 
-**[Demo video (2–3 min)](https://drive.google.com/file/d/1zs-GNEbhyFvMsoBIk6ckLEgFmALKtEwS/view?usp=sharing)** — also in-repo: [`InsightIQ_Video.mov`](./InsightIQ_Video.mov)
+<video src="https://github.com/rogue-wild/InsightIQ/raw/main/InsightIQ_Video_demo.mp4" controls playsinline width="720" title="InsightIQ demo video">
+</video>
+
+**[Watch on Google Drive](https://drive.google.com/file/d/1zs-GNEbhyFvMsoBIk6ckLEgFmALKtEwS/view?usp=sharing)** · in-repo: [`InsightIQ_Video_demo.mp4`](./InsightIQ_Video_demo.mp4) · full quality: [`InsightIQ_Video.mov`](./InsightIQ_Video.mov)
 
 Suggested script: metric drops on Alerts → open investigation → green/amber/red metric tree → diagnosis with citations → seasonality/ruled-out → chat follow-up → Langfuse public trace.
 
@@ -180,7 +183,7 @@ UI: Investigation → **Export**. Graded bundle: [`evidence/unseen/`](./evidence
 | Langfuse wiring + evidence | ✅ session + CSV in [`evidence/langfuse/`](./evidence/langfuse/) |
 | Unseen incident bundle | ✅ [`evidence/unseen/`](./evidence/unseen/) |
 | Pitch deck PDF | ✅ [`pitch-deck.pdf`](./pitch-deck.pdf) |
-| Demo video (2–3 min) | ✅ [Google Drive](https://drive.google.com/file/d/1zs-GNEbhyFvMsoBIk6ckLEgFmALKtEwS/view?usp=sharing) · [`InsightIQ_Video.mov`](./InsightIQ_Video.mov) |
+| Demo video (2–3 min) | ✅ embedded above · [Drive](https://drive.google.com/file/d/1zs-GNEbhyFvMsoBIk6ckLEgFmALKtEwS/view?usp=sharing) · [`InsightIQ_Video_demo.mp4`](./InsightIQ_Video_demo.mp4) |
 
 ## License
 
