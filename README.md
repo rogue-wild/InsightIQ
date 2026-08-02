@@ -73,15 +73,25 @@ flowchart LR
 | Detect | ClickHouse | Same-hour × ~4-week seasonality baseline; noise-floored Z-score (`greatest(stddev, 0.05)`); `|z| > 3` |
 | Drill-down | ClickHouse (+ Node enrichment) | Multi-dim contribution on `alert_dimension_contributors`; snapshot ranking across geo/OS/format/content/tier/campaign |
 | Diagnosis | Node (deterministic) then Gemini | Engine builds text + citations from computed rows; LLM **only narrates** that JSON |
-| OSS integration | **Langfuse** (JP cloud) | OTEL spans on chat/investigate/narrate — public share links / exports in [`evidence/langfuse/`](./evidence/langfuse/) |
+| OSS integration | **Langfuse** (JP cloud) | OTEL spans on chat/investigate/narrate — see links below |
 | LLM | Google Gemini (`gemini-flash-lite-latest`) | Chosen for low latency/cost; never receives raw events |
+
+### Langfuse evidence
+
+| Evidence | Link |
+|----------|------|
+| Demo chat session (public) | https://jp.cloud.langfuse.com/project/cmsaj0vmd00bcad0k7vvthm8x/sessions/insightiq-web-ea80ad96-85c6-4e73-ac47-92d85cb4875d?viewId=__langfuse_with_io__ |
+| Bulk export (CSV) | [`evidence/langfuse/1785643387197-lf-events-export-cmsaj0vmd00bcad0k7vvthm8x.csv`](./evidence/langfuse/1785643387197-lf-events-export-cmsaj0vmd00bcad0k7vvthm8x.csv) |
+| Notes | [`evidence/langfuse/SHARE_LINKS.md`](./evidence/langfuse/SHARE_LINKS.md) |
+
+Wiring: `apps/api/src/instrumentation.js`, `apps/api/.env.example` (`LANGFUSE_*`, host `https://jp.cloud.langfuse.com`).
 
 ## How we built it
 
 - **ClickHouse Cloud** — primary datastore and analytical engine (ingest → MV rollup → baselines → alerts → RCA tables)
 - **Node/Express** (`apps/api`) — in-process investigation engine (ported from Go for single-service deploy)
 - **React/Vite** (`apps/web`) — dashboard, alert wall, investigation workspace, chat
-- **Langfuse** — LLM/observability traces (wiring: `apps/api/src/instrumentation.js`, env in `apps/api/.env.example`)
+- **Langfuse** — LLM/observability traces (session + CSV above)
 - **Railway + Vercel** — hosted demo ([docs/deploy.md](./docs/deploy.md))
 
 Explainability over sophistication: seasonality baselines, contribution filters, ruled-out checks, SHA-256 evidence lock, ordered investigation `trace[]`.
