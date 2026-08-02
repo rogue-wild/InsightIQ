@@ -256,7 +256,14 @@ app.post('/v1/chat/completions', async (req, res) => {
                 investigationId,
                 alertId,
               })
-              reply = await narrateFromEvidence(content, investigation)
+              let extra = null
+              try {
+                extra = await enrichInvestigationFollowUp(content, investigation)
+                if (extra) mode = 'investigation+followup'
+              } catch (err) {
+                console.warn('follow-up enrichment failed', err.message || err)
+              }
+              reply = await narrateFromEvidence(content, investigation, extra)
             }
 
             span.update({
@@ -441,6 +448,128 @@ function detectDashboardIntent(text) {
     dimensions: dimensions.length ? dimensions : ['ad_format'],
     narrow,
     granularity: narrow ? 'hour' : 'day',
+  }
+}
+
+/**
+ * Detect follow-ups that ask for a dimension family ("which geo?", "by OS")
+ * without naming a concrete filter value.
+ */
+function detectDimensionFollowUp(text) {
+  const q = String(text || '').toLowerCase()
+  if (!q.trim()) return null
+
+  if (/\b(geo|region|regions|country|countries|geography|geographic)\b/.test(q)) {
+    return {
+      dimensions: ['region', 'country'],
+      label: 'geo (region / country)',
+      family: 'geo',
+    }
+  }
+  if (/\b(os|android|ios|device)\b/.test(q)) {
+    return {
+      dimensions: ['os_version'],
+      label: 'OS',
+      family: 'os',
+    }
+  }
+  if (/\b(format|banner|video|native|interstitial|rewarded)\b/.test(q)) {
+    return {
+      dimensions: ['ad_format'],
+      label: 'ad format',
+      family: 'ad_format',
+    }
+  }
+  if (/\b(vertical|category|content)\b/.test(q)) {
+    return {
+      dimensions: ['vertical', 'category'],
+      label: 'content (vertical / category)',
+      family: 'content',
+    }
+  }
+  if (/\b(campaign|cpm|cpc|cpi)\b/.test(q)) {
+    return {
+      dimensions: ['campaign_type'],
+      label: 'campaign type',
+      family: 'campaign_type',
+    }
+  }
+  if (/\b(publisher|tier)\b/.test(q)) {
+    return {
+      dimensions: ['publisher_tier'],
+      label: 'publisher tier',
+      family: 'publisher_tier',
+    }
+  }
+  return null
+}
+
+function familyCoveredInSegments(family, segments) {
+  const dims = new Set((segments || []).map((s) => String(s.dimension || '').toLowerCase()))
+  switch (family) {
+    case 'geo':
+      return dims.has('country') || dims.has('region')
+    case 'os':
+      return dims.has('os_version')
+    case 'ad_format':
+      return dims.has('ad_format')
+    case 'content':
+      return dims.has('vertical') || dims.has('category')
+    case 'campaign_type':
+      return dims.has('campaign_type')
+    case 'publisher_tier':
+      return dims.has('publisher_tier')
+    default:
+      return false
+  }
+}
+
+/**
+ * When a follow-up asks for geo/OS/…, pull a live breakdown for the
+ * investigation window (scoped to the advertiser when known). Always refresh
+ * region for geo asks so "which region?" is answerable even if only country
+ * was packaged in the investigation.
+ */
+async function enrichInvestigationFollowUp(question, inv) {
+  const follow = detectDimensionFollowUp(question)
+  if (!follow || !inv?.alert?.windowStart || !inv?.alert?.windowEnd) return null
+  if (!engine) return null
+
+  const covered = familyCoveredInSegments(follow.family, inv.segments)
+  // Still query for geo so region is present; otherwise only when missing.
+  if (covered && follow.family !== 'geo') return null
+
+  const start = inv.alert.windowStart
+  const end = inv.alert.windowEnd
+  const filters = {}
+  if (inv.alert.advertiserId) filters.advertiser_id = [inv.alert.advertiserId]
+
+  const body = {
+    start,
+    end,
+    compare: compareWindowFor(start, end),
+    granularity: 'hour',
+    metrics: ['revenue', 'requests', 'fill_rate', 'ecpm'],
+    dimensions: follow.dimensions,
+    filters,
+    limit: 8,
+  }
+  const out = await engine.queryDashboard(body)
+  const breakdown = {}
+  for (const dim of follow.dimensions) {
+    breakdown[dim] = (out.tables?.[dim] || []).slice(0, 6)
+  }
+  return {
+    kind: 'followup',
+    label: follow.label,
+    family: follow.family,
+    filters,
+    window: { start, end, compare: body.compare },
+    granularity: 'hour',
+    totals: out.totals || {},
+    deltas: out.deltas || {},
+    breakdown,
+    query: body,
   }
 }
 
@@ -720,6 +849,27 @@ function fallbackNarration(question, inv, extraEvidence) {
     lines.push('', '_Numbers above are from metric_hourly_snapshot via the dashboard query API._')
     return lines.join('\n')
   }
+  if (extraEvidence?.kind === 'followup' && inv) {
+    const day = formatHumanWindow(extraEvidence.window)
+    const lines = [
+      `Investigation \`${inv.id}\` — ${extraEvidence.label} for **${day}**:`,
+      '',
+    ]
+    for (const [dim, rows] of Object.entries(extraEvidence.breakdown || {})) {
+      if (!rows?.length) continue
+      lines.push(`Top ${dim}:`)
+      for (const row of rows.slice(0, 5)) {
+        const rev = row.revenue ?? row.metrics?.revenue
+        const delta = row.deltaPct != null ? ` (${fmtDelta({ deltaPct: row.deltaPct })})` : ''
+        lines.push(`- ${row.value ?? row[dim]}: revenue=${rev != null ? roundNice(rev) : 'n/a'}${delta}`)
+      }
+      lines.push('')
+    }
+    if (inv.diagnosis?.text) {
+      lines.push(`Context: ${inv.diagnosis.text}`)
+    }
+    return lines.join('\n').trim()
+  }
   if (!inv) {
     return 'No investigation evidence found. Ask about a known alert id or investigation id.'
   }
@@ -830,6 +980,7 @@ async function narrateFromEvidence(question, inv, extraEvidence = null) {
   if (!geminiKey) return fallbackNarration(question, inv, extraEvidence)
 
   const isDash = extraEvidence?.kind === 'dashboard' || extraEvidence?.kind === 'geo'
+  const isFollowUp = extraEvidence?.kind === 'followup'
   const evidence = isDash
     ? {
         kind: extraEvidence.kind,
@@ -865,16 +1016,42 @@ async function narrateFromEvidence(question, inv, extraEvidence = null) {
           text: inv.diagnosis?.text,
           citations: (inv.diagnosis?.citations || []).slice(0, 8),
         },
+        ...(isFollowUp
+          ? {
+              followUp: {
+                label: extraEvidence.label,
+                family: extraEvidence.family,
+                date: formatHumanWindow(extraEvidence.window),
+                breakdown: Object.fromEntries(
+                  Object.entries(extraEvidence.breakdown || {}).map(([dim, rows]) => [
+                    dim,
+                    (rows || []).slice(0, 6).map((row) => ({
+                      value: row.value ?? row[dim],
+                      revenue: roundNice(row.revenue ?? row.metrics?.revenue),
+                      requests: roundNice(row.requests ?? row.metrics?.requests, 0),
+                      deltaPct:
+                        row.revenue_delta_pct ??
+                        row.deltaPct ??
+                        row.deltas?.revenue?.deltaPct,
+                    })),
+                  ]),
+                ),
+              },
+            }
+          : {}),
       }
 
   const system = [
     'You are InsightIQ, an automated analytics narrator.',
-    'Ground every number in the provided evidence JSON — never invent metrics, segments, or percentages.',
-    'Answer the user question directly. Follow-ups about geo, OS, format, vertical, etc. should quote matching rows from evidence.segments when present.',
-    'If the asked dimension is missing from segments, say so briefly and list availableDimensions (or the dimensions that are present) — do not refuse the whole turn.',
+    'Ground every number in the provided evidence JSON — never invent metrics, segments, percentages, or date ranges.',
+    'Answer the user question directly. Follow-ups about geo, OS, format, vertical, etc. should quote matching rows from evidence.segments and/or evidence.followUp.breakdown when present.',
+    'Geo rule: country and region both count as geographic answers. If the user asks for region/geo and country is present, report the country (and region from followUp when available). Do not say geo is missing when country or region rows exist.',
+    'If the asked dimension is truly absent from segments and followUp, say so briefly and list availableDimensions — do not refuse the whole turn.',
     isDash
-      ? 'This evidence is a dashboard query result for the exact filters listed. Answer using totals.revenue / totals.requests / etc. for that filter intersection. Do not ignore filters like os_version.'
-      : 'This evidence is a root-cause investigation package. Lead with the diagnosis, then the segments most relevant to the question.',
+      ? 'This evidence is a dashboard query result for the exact filters listed. Answer using totals.revenue / totals.requests / etc. for that filter intersection. The period is evidence.date — never claim a different date range than evidence.date / windowISO.'
+      : isFollowUp
+        ? 'This is an investigation plus a live follow-up breakdown. Lead with followUp.breakdown for the asked dimension, then briefly tie it back to the diagnosis.'
+        : 'This evidence is a root-cause investigation package. Lead with the diagnosis, then the segments most relevant to the question.',
     'Keep the answer to 2-5 short sentences. Conversational, not a legal disclaimer.',
     'Format dates as human calendar dates (e.g. 21 Jun 2026). Never paste raw ISO timestamps like 2026-06-21T00:00:00.000Z.',
     'Round revenue to 2 decimals. Do not print floating-point noise.',
@@ -895,7 +1072,7 @@ async function narrateFromEvidence(question, inv, extraEvidence = null) {
           ],
           model: geminiModel,
           metadata: {
-            evidenceKind: isDash ? 'dashboard' : 'investigation',
+            evidenceKind: isDash ? 'dashboard' : isFollowUp ? 'investigation+followup' : 'investigation',
             investigationId: inv?.id || null,
             filters: extraEvidence?.filters || null,
           },

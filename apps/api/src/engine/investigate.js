@@ -208,8 +208,8 @@ export async function runInvestigation(client, req) {
     durationMs: 0,
   })
 
-  let uiSegments = segments
-  if (uiSegments.length > 6) uiSegments = uiSegments.slice(0, 6)
+  // Keep category diversity so follow-ups ("which geo?", "which OS?") still have rows.
+  const uiSegments = diversifySegments(segments, 8)
 
   const inv = {
     id: invID,
@@ -835,6 +835,40 @@ function mergeSegments(primary, extra, limit) {
   }
   if (out.length > limit) return out.slice(0, limit)
   return out
+}
+
+/** Prefer one row per category (geo, OS, …), then fill by |contribution|. */
+export function diversifySegments(segments, limit = 8) {
+  const all = Array.isArray(segments) ? segments.slice() : []
+  if (all.length <= limit) return all
+
+  const byContrib = (a, b) => Math.abs(b.contributionPct || 0) - Math.abs(a.contributionPct || 0)
+  all.sort(byContrib)
+
+  const picked = []
+  const seenKey = new Set()
+  const seenCat = new Set()
+  const keyOf = (s) => `${s.dimension}|${s.value}`
+
+  for (const cat of alertCategoryOrder) {
+    const hit = all.find((s) => categoryForDimension(s.dimension) === cat)
+    if (!hit) continue
+    const k = keyOf(hit)
+    if (seenKey.has(k)) continue
+    seenKey.add(k)
+    seenCat.add(cat)
+    picked.push(hit)
+    if (picked.length >= limit) return picked
+  }
+
+  for (const s of all) {
+    const k = keyOf(s)
+    if (seenKey.has(k)) continue
+    seenKey.add(k)
+    picked.push(s)
+    if (picked.length >= limit) break
+  }
+  return picked
 }
 
 /**

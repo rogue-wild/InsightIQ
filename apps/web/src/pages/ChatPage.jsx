@@ -71,7 +71,8 @@ export default function ChatPage() {
         <div>
           <h1 className="page-title">Chat</h1>
           <p className="page-subtitle" style={{ marginBottom: 0 }}>
-            Ask why a metric moved, or follow up on geo / OS / format — answers stay grounded in the investigation.
+            Ask why a metric moved, or follow up on geo / OS / format — chat will query live
+            evidence when the packaged investigation is missing that slice.
           </p>
         </div>
         <div className="chat-toolbar-actions">

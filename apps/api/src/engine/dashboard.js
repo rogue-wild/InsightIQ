@@ -241,7 +241,8 @@ function normalizeDimensions(inDims) {
 
 function sanitizeFilters(inFilters) {
   if (!inFilters || typeof inFilters !== 'object') return {}
-  const allowed = new Set(dashboardDimensions.map((d) => d.id))
+  // advertiser_id is a snapshot column used to scope investigation follow-ups.
+  const allowed = new Set([...dashboardDimensions.map((d) => d.id), 'advertiser_id'])
   const out = {}
   for (const [k, vals] of Object.entries(inFilters)) {
     if (!allowed.has(k) || !Array.isArray(vals) || vals.length === 0) continue
