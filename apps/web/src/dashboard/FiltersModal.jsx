@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import ModalPortal from '../components/ModalPortal.jsx'
 import { getDashboardFilterValues } from '../api/client.js'
 import { dimensionLabel } from './config.js'
 
@@ -50,6 +51,7 @@ export default function FiltersModal({
   }
 
   return (
+    <ModalPortal>
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div className="modal-card panel modal-wide" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
@@ -133,5 +135,6 @@ export default function FiltersModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   )
 }

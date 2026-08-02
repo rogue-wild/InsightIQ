@@ -7,6 +7,7 @@ import {
 } from '@langfuse/tracing'
 import { flushLangfuse } from './instrumentation.js'
 import { createClickHouse, createEngine, queryMaps } from './engine/index.js'
+import { compareWindowFor, parseDateWindowFromText } from './chatDates.js'
 
 const app = express()
 const port = Number(process.env.PORT || 4000)
@@ -443,131 +444,6 @@ function detectDashboardIntent(text) {
   }
 }
 
-const MONTH_INDEX = {
-  jan: 0,
-  january: 0,
-  feb: 1,
-  february: 1,
-  mar: 2,
-  march: 2,
-  apr: 3,
-  april: 3,
-  may: 4,
-  jun: 5,
-  june: 5,
-  jul: 6,
-  july: 6,
-  aug: 7,
-  august: 7,
-  sep: 8,
-  sept: 8,
-  september: 8,
-  oct: 9,
-  october: 9,
-  nov: 10,
-  november: 10,
-  dec: 11,
-  december: 11,
-}
-
-/** Parse "2026-06-21", "21 June 2026", "June 21, 2026", "21/06/2026" → YYYY-MM-DD. */
-function parseOneDayToken(text) {
-  const q = String(text || '')
-
-  const iso = q.match(/\b(\d{4})-(\d{2})-(\d{2})\b/)
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
-
-  const dmySlash = q.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})\b/)
-  if (dmySlash) {
-    const d = Number(dmySlash[1])
-    const m = Number(dmySlash[2])
-    const y = Number(dmySlash[3])
-    // Prefer D/M/Y for slash-separated dates.
-    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-    }
-  }
-
-  const dMonthY = q.match(
-    /\b(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*(\d{4})\b/i,
-  )
-  if (dMonthY) {
-    const d = Number(dMonthY[1])
-    const m = MONTH_INDEX[dMonthY[2].toLowerCase()]
-    const y = Number(dMonthY[3])
-    if (m != null && d >= 1 && d <= 31) {
-      return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-    }
-  }
-
-  const monthDY = q.match(
-    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(\d{4})\b/i,
-  )
-  if (monthDY) {
-    const m = MONTH_INDEX[monthDY[1].toLowerCase()]
-    const d = Number(monthDY[2])
-    const y = Number(monthDY[3])
-    if (m != null && d >= 1 && d <= 31) {
-      return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-    }
-  }
-
-  return null
-}
-
-/** Parse absolute or relative date hints from the user question. */
-function parseDateWindowFromText(text) {
-  const q = String(text || '')
-
-  const isoRange = q.match(/(\d{4}-\d{2}-\d{2}).{0,48}?(\d{4}-\d{2}-\d{2})/)
-  if (isoRange) {
-    return windowFromDayBounds(isoRange[1], isoRange[2])
-  }
-
-  // "from 21 June 2026 to 28 June 2026" / "between June 21 and June 28, 2026"
-  const naturalRange = q.match(
-    /\b(?:from|between)\s+(.+?)\s+(?:to|and|through|-)\s+(.+?)(?:\?|$)/i,
-  )
-  if (naturalRange) {
-    const a = parseOneDayToken(naturalRange[1])
-    const b = parseOneDayToken(naturalRange[2])
-    if (a && b) return windowFromDayBounds(a, b)
-  }
-
-  const single = parseOneDayToken(q)
-  if (single) return windowFromDayBounds(single, single)
-
-  if (/\btoday\b|\bthis day\b|\blast day\b|\byesterday\b/i.test(q)) {
-    return { kind: 'day' }
-  }
-  if (/\bthis week\b|\blast\s*7\s*days\b|\bpast week\b|\blast week\b/i.test(q)) {
-    return { kind: 'week' }
-  }
-  return null
-}
-
-function windowFromDayBounds(startDay, endDay) {
-  const start = `${startDay}T00:00:00.000Z`
-  const end = `${endDay}T23:59:59.000Z`
-  return {
-    start,
-    end,
-    compare: compareWindowFor(start, end),
-  }
-}
-
-function compareWindowFor(startISO, endISO) {
-  const start = new Date(startISO)
-  const end = new Date(endISO)
-  const ms = Math.max(end.getTime() - start.getTime(), 0)
-  const cEnd = new Date(start.getTime() - 1000)
-  const cStart = new Date(cEnd.getTime() - ms)
-  return {
-    start: cStart.toISOString(),
-    end: cEnd.toISOString(),
-  }
-}
-
 let liveRangeCache = { at: 0, value: null }
 
 async function fetchLiveDataRange() {
@@ -586,11 +462,12 @@ async function fetchLiveDataRange() {
  * available in metric_hourly_snapshot.
  */
 async function resolveChatWindow(text, narrow) {
-  const parsed = parseDateWindowFromText(text)
+  const range = await fetchLiveDataRange()
+  const defaultYear = range?.max ? new Date(range.max).getUTCFullYear() : new Date().getUTCFullYear()
+  const parsed = parseDateWindowFromText(text, defaultYear)
   if (parsed?.start && parsed?.end) return parsed
 
   const kind = parsed?.kind || (narrow ? 'day' : 'week')
-  const range = await fetchLiveDataRange()
   if (!range?.max) {
     throw new Error('no snapshot data available to choose a date window')
   }
@@ -846,25 +723,38 @@ function fallbackNarration(question, inv, extraEvidence) {
   if (!inv) {
     return 'No investigation evidence found. Ask about a known alert id or investigation id.'
   }
+  const q = question || ''
+  const segments = selectSegmentsForQuestion(q, inv.segments, 8)
   const lines = [
     `Investigation \`${inv.id}\` (${inv.status}).`,
     '',
     inv.diagnosis?.text || '',
-    '',
-    'Citations (from evidence only):',
-    ...(inv.diagnosis?.citations || []).map((c) => `- ${c.label}: ${c.value}`),
   ]
+  if (segments.length) {
+    lines.push('', 'Segments:')
+    for (const s of segments.slice(0, 6)) {
+      const dim = s.dimension || 'dim'
+      const val = s.value || ''
+      const pct = s.deltaPct != null ? `${s.deltaPct > 0 ? '+' : ''}${Number(s.deltaPct).toFixed(1)}%` : ''
+      const contrib =
+        s.contributionPct != null ? `, contrib ${Number(s.contributionPct).toFixed(1)}%` : ''
+      lines.push(`- ${dim}=${val} (${pct}${contrib})`)
+    }
+  }
+  if (inv.diagnosis?.citations?.length) {
+    lines.push('', 'Citations:')
+    for (const c of inv.diagnosis.citations.slice(0, 6)) lines.push(`- ${c.label}: ${c.value}`)
+  }
   if (inv.ruledOut?.length) {
     lines.push('', 'Ruled out:')
     for (const item of inv.ruledOut) lines.push(`- ${item.reason}: ${item.detail}`)
   }
-  if (/what else|follow|more|trace/i.test(question || '')) {
+  if (/what else|follow|more|trace/i.test(q)) {
     lines.push('', 'Trace:')
     for (const step of inv.trace || []) {
       lines.push(`- ${step.step}: ${step.detail}${step.durationMs ? ` (${step.durationMs} ms)` : ''}`)
     }
   }
-  lines.push('', '_Numbers above are copied from the investigation evidence JSON._')
   return lines.join('\n')
 }
 
@@ -913,6 +803,28 @@ async function callGeminiNarration(system, userPrompt) {
   }
 }
 
+/** Prefer segments that match the user's follow-up (geo, OS, format, …). */
+function selectSegmentsForQuestion(question, segments, limit = 8) {
+  const all = Array.isArray(segments) ? segments : []
+  if (all.length <= limit) return all
+  const q = String(question || '').toLowerCase()
+  const want = []
+  if (/\b(geo|region|country|countries|nam|eu|apac|latam|mea)\b/.test(q)) {
+    want.push('country', 'region')
+  }
+  if (/\b(os|android|ios|device)\b/.test(q)) want.push('os_version')
+  if (/\b(format|banner|video|native|interstitial)\b/.test(q)) want.push('ad_format')
+  if (/\b(vertical|category|content)\b/.test(q)) want.push('vertical', 'category')
+  if (/\b(campaign|cpm|cpc|cpi)\b/.test(q)) want.push('campaign_type')
+  if (/\b(publisher|tier)\b/.test(q)) want.push('publisher_tier')
+
+  if (want.length === 0) return all.slice(0, limit)
+
+  const matched = all.filter((s) => want.includes(String(s.dimension || '').toLowerCase()))
+  const rest = all.filter((s) => !want.includes(String(s.dimension || '').toLowerCase()))
+  return [...matched, ...rest].slice(0, limit)
+}
+
 async function narrateFromEvidence(question, inv, extraEvidence = null) {
   if (!inv && !extraEvidence) return fallbackNarration(question, inv, extraEvidence)
   if (!geminiKey) return fallbackNarration(question, inv, extraEvidence)
@@ -938,22 +850,32 @@ async function narrateFromEvidence(question, inv, extraEvidence = null) {
         status: inv.status,
         alert: inv.alert,
         decomposition: inv.decomposition,
-        segments: (inv.segments || []).slice(0, 5),
+        segments: selectSegmentsForQuestion(question, inv.segments, 8),
+        availableDimensions: [...new Set((inv.segments || []).map((s) => s.dimension).filter(Boolean))],
         ruledOut: inv.ruledOut,
+        seasonality: inv.seasonality
+          ? {
+              status: inv.seasonality.status,
+              flatDeltaPct: inv.seasonality.flatDeltaPct,
+              seasonalDeltaPct: inv.seasonality.seasonalDeltaPct,
+              detail: inv.seasonality.detail,
+            }
+          : null,
         diagnosis: {
           text: inv.diagnosis?.text,
-          citations: (inv.diagnosis?.citations || []).slice(0, 6),
+          citations: (inv.diagnosis?.citations || []).slice(0, 8),
         },
       }
 
   const system = [
     'You are InsightIQ, an automated analytics narrator.',
-    'You MUST only use numbers and facts present in the provided evidence JSON.',
-    'Never invent metrics, segments, or percentages.',
+    'Ground every number in the provided evidence JSON — never invent metrics, segments, or percentages.',
+    'Answer the user question directly. Follow-ups about geo, OS, format, vertical, etc. should quote matching rows from evidence.segments when present.',
+    'If the asked dimension is missing from segments, say so briefly and list availableDimensions (or the dimensions that are present) — do not refuse the whole turn.',
     isDash
       ? 'This evidence is a dashboard query result for the exact filters listed. Answer using totals.revenue / totals.requests / etc. for that filter intersection. Do not ignore filters like os_version.'
-      : 'This evidence is a root-cause investigation package. Summarize diagnosis + top 2-3 segments only.',
-    'Keep the answer to 2-4 short sentences.',
+      : 'This evidence is a root-cause investigation package. Lead with the diagnosis, then the segments most relevant to the question.',
+    'Keep the answer to 2-5 short sentences. Conversational, not a legal disclaimer.',
     'Format dates as human calendar dates (e.g. 21 Jun 2026). Never paste raw ISO timestamps like 2026-06-21T00:00:00.000Z.',
     'Round revenue to 2 decimals. Do not print floating-point noise.',
   ].join(' ')

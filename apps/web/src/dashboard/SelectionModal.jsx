@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import ModalPortal from '../components/ModalPortal.jsx'
 
 export default function SelectionModal({
   title,
@@ -21,6 +22,7 @@ export default function SelectionModal({
   }
 
   return (
+    <ModalPortal>
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
         className="modal-card panel"
@@ -91,5 +93,6 @@ export default function SelectionModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   )
 }

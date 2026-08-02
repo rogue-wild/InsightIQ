@@ -71,7 +71,7 @@ export default function ChatPage() {
         <div>
           <h1 className="page-title">Chat</h1>
           <p className="page-subtitle" style={{ marginBottom: 0 }}>
-            Ask InsightIQ why a metric moved — answers stay grounded in investigation evidence.
+            Ask why a metric moved, or follow up on geo / OS / format — answers stay grounded in the investigation.
           </p>
         </div>
         <div className="chat-toolbar-actions">
