@@ -29,12 +29,13 @@ Open each important trace in Langfuse → **Share** → enable public access →
 Pattern (JP):  
 `https://jp.cloud.langfuse.com/project/cmsaj0vmd00bcad0k7vvthm8x/traces/<traceId>`
 
-| Run | Trace ID | Public share URL |
-|-----|----------|------------------|
-| Demo chat (example) | `3794b0dbc8e300ccf9998c0d55bbf0c9` | Make public, then: `https://jp.cloud.langfuse.com/project/cmsaj0vmd00bcad0k7vvthm8x/traces/3794b0dbc8e300ccf9998c0d55bbf0c9` |
+| Run | ID | Share URL |
+|-----|-----|-----------|
+| Demo chat session | `insightiq-web-ea80ad96-85c6-4e73-ac47-92d85cb4875d` | https://jp.cloud.langfuse.com/project/cmsaj0vmd00bcad0k7vvthm8x/sessions/insightiq-web-ea80ad96-85c6-4e73-ac47-92d85cb4875d?viewId=__langfuse_with_io__ |
+| Demo chat trace (example) | `3794b0dbc8e300ccf9998c0d55bbf0c9` | https://jp.cloud.langfuse.com/project/cmsaj0vmd00bcad0k7vvthm8x/traces/3794b0dbc8e300ccf9998c0d55bbf0c9 |
 | Unseen incident | after release | TODO |
 
-Opening that URL **without** making the trace public will still require login. Use Share → public first.
+Confirm session/trace links open in an **incognito** window without login (Share → public if needed).
 
 ### How to make a trace public (UI)
 
