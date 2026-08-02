@@ -34,12 +34,21 @@ Dockerfiles live at `apps/engine/Dockerfile` and `apps/api/Dockerfile`.
 
 Create one Railway **project** (e.g. `insightiq`) with two services from the same GitHub repo.
 
+**Do not deploy from the repo root.** If Railpack analyzes `./apps`, `./docs`, `./README.md` and says it “could not determine how to build the app”, the service **Root Directory** is still `/` (monorepo root). Fix that before anything else.
+
+For **each** service → **Settings**:
+
+1. **Root Directory** → `apps/engine` or `apps/api` (not blank / not `/`)
+2. **Builder** → **Dockerfile** (not Railpack / Nixpacks)
+3. **Dockerfile path** → `Dockerfile` (relative to that root)
+4. Redeploy
+
 ### Service A — `engine`
 
 | Setting | Value |
 |---------|--------|
 | Root Directory | `apps/engine` |
-| Builder | Dockerfile |
+| Builder | **Dockerfile** (not Railpack) |
 | Dockerfile path | `Dockerfile` |
 | Public networking | **Off** (no domain) |
 
@@ -63,7 +72,7 @@ Health check path: `/health` (also in `apps/engine/railway.toml`).
 | Setting | Value |
 |---------|--------|
 | Root Directory | `apps/api` |
-| Builder | Dockerfile |
+| Builder | **Dockerfile** (not Railpack) |
 | Dockerfile path | `Dockerfile` |
 | Public networking | **On** — Generate Domain |
 
@@ -158,6 +167,24 @@ npx wrangler pages deploy dist --project-name=insightiq
 ```
 
 ---
+
+## Troubleshooting
+
+### `Railpack could not determine how to build the app`
+
+Railpack saw the monorepo root. This repo is not a single Node/Go app at `/`.
+
+1. Service **Settings → Root Directory** = `apps/engine` or `apps/api`
+2. **Builder** = **Dockerfile**
+3. Trigger a new deploy
+
+You should see Docker build steps (`FROM golang…` or `FROM node…`), not `Railpack 0.x`.
+
+### API health shows engine down
+
+- Both services in the **same** Railway project
+- `ENGINE_URL=http://${{engine.RAILWAY_PRIVATE_DOMAIN}}:${{engine.PORT}}` (service name must match)
+- Engine has **no** requirement for a public domain
 
 ## Ops notes
 
