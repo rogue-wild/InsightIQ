@@ -1,6 +1,6 @@
 # InsightIQ Node API
 
-REST + in-process ClickHouse RCA (`src/engine`) + Gemini narration + LibreChat-compatible `/v1` chat. Traces LLM + evidence steps to **Langfuse**.
+REST + in-process ClickHouse RCA (`src/engine`) + Gemini narration + in-app `/v1` chat. Traces LLM + evidence steps to **Langfuse**.
 
 ```bash
 cp .env.example .env
@@ -30,4 +30,4 @@ Each chat turn emits a trace tree:
 - `GET /api/alerts`
 - `POST /api/investigate` — traced
 - `GET /api/investigations/:id`
-- `POST /v1/chat/completions` — LibreChat + in-app chat (traced)
+- `POST /v1/chat/completions` — in-app chat (traced)

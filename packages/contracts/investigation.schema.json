@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://insightiq.local/contracts/investigation.schema.json",
   "title": "Investigation",
-  "description": "Evidence payload shared by the React dashboard, Node API investigation engine, and LibreChat tools.",
+  "description": "Evidence payload shared by the React dashboard and Node API investigation engine.",
   "type": "object",
   "required": [
     "id",

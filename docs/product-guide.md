@@ -44,4 +44,4 @@ Natural language → `POST /v1/chat/completions`.
 - Filter questions (region, country, OS, dates) → dashboard query
 - RCA questions → investigation evidence
 
-Markdown tables render if the model emits them. Charts live on the Dashboard. LibreChat can use the same `/v1` API when configured.
+Markdown tables render if the model emits them. Charts live on the Dashboard.

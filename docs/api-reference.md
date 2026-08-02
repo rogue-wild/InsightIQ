@@ -103,4 +103,4 @@ Distinct values for filter pickers.
 }
 ```
 
-OpenAI-compatible; used by in-app chat and LibreChat.
+OpenAI-compatible; used by in-app chat.

@@ -29,7 +29,6 @@ cd apps/web && npm install && npm run dev
 
 ```bash
 VITE_API_URL=http://localhost:4000
-VITE_LIBRECHAT_URL=http://localhost:3080
 ```
 
 See [docs/setup.md](docs/setup.md) for ClickHouse, Gemini, and Langfuse configuration.
@@ -62,7 +61,6 @@ apps/api/              REST, in-process RCA, Gemini, chat, Langfuse
 apps/api/src/engine/   ClickHouse investigation engine
 packages/contracts     Investigation schema
 infra/clickhouse/      View-layer SQL reference
-infra/librechat/       LibreChat config
 docs/                  Project documentation
 scripts/               Investigation export CLI
 ```

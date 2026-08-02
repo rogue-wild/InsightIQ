@@ -7,22 +7,6 @@ function bubbleKey(role, index) {
   return `${role}-${index}`
 }
 
-const LIBRECHAT_URL = (import.meta.env.VITE_LIBRECHAT_URL || 'http://localhost:3080').replace(
-  /\/$/,
-  '',
-)
-
-function libreChatHref(prompt) {
-  const params = new URLSearchParams()
-  params.set('endpoint', 'InsightIQ')
-  params.set('model', 'insightiq-rca')
-  if (prompt?.trim()) {
-    params.set('prompt', prompt.trim())
-    params.set('submit', 'true')
-  }
-  return `${LIBRECHAT_URL}/c/new?${params.toString()}`
-}
-
 export default function ChatPage() {
   const [params] = useSearchParams()
   const initialQ = params.get('q') || params.get('prompt') || ''
@@ -80,11 +64,6 @@ export default function ChatPage() {
   }
 
   const contextBits = [investigationId, alertId].filter(Boolean)
-  const handoffPrompt =
-    input.trim() ||
-    messages.filter((m) => m.role === 'user').at(-1)?.content ||
-    initialQ ||
-    'How is APAC revenue doing this week?'
 
   return (
     <div className="chat-page fade-in">
@@ -99,15 +78,6 @@ export default function ChatPage() {
           {contextBits.length > 0 ? (
             <span className="mono muted chat-context">{investigationId || alertId}</span>
           ) : null}
-          <a
-            className="btn btn-primary"
-            href={libreChatHref(handoffPrompt)}
-            target="_blank"
-            rel="noreferrer"
-            title="Continue in LibreChat with MCP tools"
-          >
-            Open in LibreChat
-          </a>
           <Link to="/alerts" className="btn">
             Alerts
           </Link>
@@ -121,7 +91,7 @@ export default function ChatPage() {
               <p className="chat-empty-title">Start with a question</p>
               <p className="muted">
                 Try “How is India doing?” or “How is APAC revenue?” — or open an investigation and use
-                Ask in chat. Use <strong>Open in LibreChat</strong> for MCP-powered exploration.
+                Ask in chat.
               </p>
             </div>
           ) : null}

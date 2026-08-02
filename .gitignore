@@ -6,12 +6,10 @@ dist/
 apps/web/dist/
 apps/api/node_modules/
 apps/web/node_modules/
-infra/librechat/.env
-apps/engine/.env
 apps/api/.env
 apps/web/.env
-apps/engine/bin/
 .cursor/
+# Local clone of LibreChat (not part of this product)
 /LibreChat/
 data/*.csv
 data/*.parquet

@@ -4,7 +4,7 @@
 
 - Node.js 20+
 - ClickHouse Cloud (or compatible) database `insightiq` with the InsightIQ schema and data
-- Optional: Gemini API key, Langfuse, LibreChat
+- Optional: Gemini API key, Langfuse
 
 ## Environment
 
@@ -30,7 +30,6 @@ LANGFUSE_BASE_URL=https://jp.cloud.langfuse.com
 
 ```bash
 VITE_API_URL=http://localhost:4000
-VITE_LIBRECHAT_URL=http://localhost:3080
 ```
 
 ## Start services
@@ -68,10 +67,6 @@ SELECT count() FROM insightiq.alerts_live WHERE abs(zscore) > 3;
 ```
 
 Full cascade: [pipeline.md](./pipeline.md).
-
-## LibreChat (optional)
-
-Config under `infra/librechat/`. Point the custom endpoint at the API `/v1` base. Model id: `insightiq-rca`.
 
 ## Investigation export CLI
 

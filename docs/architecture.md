@@ -77,7 +77,7 @@ In-process RCA under `apps/api/src/engine/`:
 - Dashboard meta and filtered timeseries
 - Investigation export (diagnosis, trace, evidence hash)
 - Gemini narrates structured evidence only
-- OpenAI-compatible `/v1/chat/completions` for in-app chat and LibreChat
+- OpenAI-compatible `/v1/chat/completions` for in-app chat
 - Optional Langfuse tracing
 
 ### Web — React (`:5173`)
@@ -114,7 +114,6 @@ apps/api/                 Node BFF + in-process RCA + Gemini + chat
 apps/api/src/engine/      ClickHouse investigation engine
 packages/contracts/       Investigation JSON schema
 infra/clickhouse/         View-layer SQL reference
-infra/librechat/          LibreChat config
 scripts/export-investigation.mjs  Investigation export CLI
 docs/                     Documentation
 ```
