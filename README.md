@@ -34,8 +34,7 @@ Suggested demo path (matches InMobi guidelines): Alerts → open a revenue drop 
 
 ## Demo Video
 
-<!-- Mandatory: 2–3 minute recording. Replace this link before code freeze. -->
-**TODO — add link:** `[Demo video (2–3 min)](https://…)`
+**[Demo video (2–3 min)](https://drive.google.com/file/d/1zs-GNEbhyFvMsoBIk6ckLEgFmALKtEwS/view?usp=sharing)** — also in-repo: [`InsightIQ_Video.mov`](./InsightIQ_Video.mov)
 
 Suggested script: metric drops on Alerts → open investigation → green/amber/red metric tree → diagnosis with citations → seasonality/ruled-out → chat follow-up → Langfuse public trace.
 
@@ -181,7 +180,7 @@ UI: Investigation → **Export**. Graded bundle: [`evidence/unseen/`](./evidence
 | Langfuse wiring + evidence | ✅ session + CSV in [`evidence/langfuse/`](./evidence/langfuse/) |
 | Unseen incident bundle | ✅ [`evidence/unseen/`](./evidence/unseen/) |
 | Pitch deck PDF | ✅ [`pitch-deck.pdf`](./pitch-deck.pdf) |
-| Demo video (2–3 min) | ⬜ add link above |
+| Demo video (2–3 min) | ✅ [Google Drive](https://drive.google.com/file/d/1zs-GNEbhyFvMsoBIk6ckLEgFmALKtEwS/view?usp=sharing) · [`InsightIQ_Video.mov`](./InsightIQ_Video.mov) |
 
 ## License
 
