@@ -2,7 +2,7 @@
 
 ## Overview
 
-InsightIQ is a low-latency analytics control plane for ad-tech event streams. A **reactive cascade inside ClickHouse** turns raw events into noise-filtered alerts and dimension-level root-cause rows; the Go engine and Node/React apps investigate and narrate that evidence without re-processing the raw firehose.
+InsightIQ is a low-latency analytics control plane for ad-tech event streams. A **reactive cascade inside ClickHouse** turns raw events into noise-filtered alerts and dimension-level root-cause rows; the Node API runs deterministic RCA in-process and narrates evidence with an LLM.
 
 Native cascade details: [pipeline.md](./pipeline.md).
 
@@ -16,16 +16,11 @@ flowchart LR
   end
 
   subgraph API["apps/api · Node :4000"]
-    REST[REST proxy]
+    REST[REST]
+    Eng["src/engine RCA"]
     LLM[Gemini narration]
     OAI["/v1 chat completions"]
     Trace[Langfuse]
-  end
-
-  subgraph Engine["apps/engine · Go :4100"]
-    Detect[Alert detect]
-    RCA[Investigate / decompose / slice]
-    DashQ[Dashboard query]
   end
 
   subgraph CH["ClickHouse · insightiq"]
@@ -46,11 +41,10 @@ flowchart LR
 
   Dash & Alerts & Inv & Chat --> REST
   Chat --> OAI
-  REST --> Detect & RCA & DashQ
+  REST --> Eng
   OAI --> LLM
-  OAI --> DashQ
-  OAI --> RCA
-  Detect & RCA & DashQ --> Snap & AlertsLive & Contrib & Obs
+  OAI --> Eng
+  Eng --> Snap & AlertsLive & Contrib & Obs
   REST & OAI --> Trace
 ```
 
@@ -74,16 +68,14 @@ Reactive cascade (ingest → aggregate → baseline → alert → attribute → 
 
 Techniques: seasonality window functions, stddev floor (e.g. `greatest(stddev, 0.05)`), contribution filters. Full write-up: [pipeline.md](./pipeline.md) · schema: [data-model.md](./data-model.md).
 
-### Investigation engine — Go (`:4100`)
+### API + investigation engine — Node (`:4000`)
+
+In-process RCA under `apps/api/src/engine/`:
 
 - List alerts (`day` or `hour` granularity)
 - Investigate: baseline → metric decompose → dimension slice → seasonality / waterfall / counterfactual / hypotheses
 - Dashboard meta and filtered timeseries
 - Investigation export (diagnosis, trace, evidence hash)
-
-### API — Node (`:4000`)
-
-- Proxies alerts, investigations, dashboard
 - Gemini narrates structured evidence only
 - OpenAI-compatible `/v1/chat/completions` for in-app chat and LibreChat
 - Optional Langfuse tracing
@@ -99,8 +91,8 @@ Techniques: seasonality window functions, stddev floor (e.g. `greatest(stddev, 0
 
 ## Request paths
 
-1. **Alert wall** — Web → API → Engine → `alerts_live`
-2. **Open alert** — Web → API → Engine investigate → diagnosis JSON
+1. **Alert wall** — Web → API engine → `alerts_live`
+2. **Open alert** — Web → API investigate → diagnosis JSON
 3. **Filter questions in chat** — API parses filters/dates → dashboard query → narrate
 4. **RCA questions in chat** — resolve investigation → narrate from evidence
 
@@ -109,7 +101,7 @@ Techniques: seasonality window functions, stddev floor (e.g. `greatest(stddev, 0
 | Principle | Meaning |
 |-----------|---------|
 | Cascade in the database | Aggregation, baseline, anomaly, and first-pass RCA live in ClickHouse |
-| Compute near the data | Further RCA in Go against the view layer |
+| Compute near the data | Further RCA in Node against the view layer |
 | Evidence-bound LLM | Model explains numbers the engine computed |
 | View layer only | Product paths do not scan raw events |
 | Traceability | Investigation `trace`, optional Langfuse, evidence hash |
@@ -118,8 +110,8 @@ Techniques: seasonality window functions, stddev floor (e.g. `greatest(stddev, 0
 
 ```
 apps/web/                 React UI
-apps/api/                 Node BFF + Gemini + chat
-apps/engine/              Go ClickHouse RCA engine
+apps/api/                 Node BFF + in-process RCA + Gemini + chat
+apps/api/src/engine/      ClickHouse investigation engine
 packages/contracts/       Investigation JSON schema
 infra/clickhouse/         View-layer SQL reference
 infra/librechat/          LibreChat config

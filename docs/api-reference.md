@@ -1,28 +1,41 @@
 # API reference
 
-Local bases:
+Local base: `http://127.0.0.1:4000`
 
-- Engine: `http://127.0.0.1:4100`
-- API: `http://127.0.0.1:4000`
+RCA runs **in-process** inside the Node API (`apps/api/src/engine`). There is no separate engine port.
 
 ---
 
-## Engine
+## Health
 
 ### `GET /health`
 
 ```json
-{ "ok": true, "service": "insightiq-engine", "database": "insightiq", "alerts": 388 }
+{
+  "ok": true,
+  "service": "insightiq-api",
+  "gemini": true,
+  "clickhouse": { "ok": true, "database": "insightiq", "alerts": 388 },
+  "langfuse": true
+}
 ```
 
-### `GET /alerts?granularity=day|hour`
+---
+
+## Alerts & investigations
+
+### `GET /api/alerts?granularity=day|hour`
 
 Default: `day`.
 
 - `day` — peak hourly anomaly per advertiser per UTC day
 - `hour` — native hourly buckets from `alerts_live`
 
-### `POST /investigate`
+### `GET /api/alerts/:alertId`
+
+### `GET /api/alerts/:alertId/investigation`
+
+### `POST /api/investigate`
 
 ```json
 { "alertId": "<uuid>" }
@@ -39,19 +52,23 @@ Or window fields:
 }
 ```
 
-### `GET /investigations/:id`
+### `GET /api/investigations/:id`
 
 Cached investigation or rebuild (`inv-<alertUuid>`).
 
-### `GET /investigations/:id/export`
+### `GET /api/investigations/:id/export`
 
 Evidence bundle: diagnosis, trace, evidence hash, seasonality, waterfall, counterfactual, hypotheses.
 
-### `GET /dashboard/meta`
+---
+
+## Dashboard
+
+### `GET /api/dashboard/meta`
 
 Metrics, dimensions, and `dataRange` `{ min, max, buckets }`.
 
-### `POST /dashboard/query`
+### `POST /api/dashboard/query`
 
 ```json
 {
@@ -66,29 +83,13 @@ Metrics, dimensions, and `dataRange` `{ min, max, buckets }`.
 }
 ```
 
-### `GET /dashboard/filters?dimension=&start=&end=`
+### `GET /api/dashboard/filters?dimension=&start=&end=`
 
 Distinct values for filter pickers.
 
 ---
 
-## Node API
-
-### `GET /health`
-
-Includes nested engine health, `gemini`, `langfuse`.
-
-| Method | Path |
-|--------|------|
-| GET | `/api/alerts?granularity=day\|hour` |
-| GET | `/api/alerts/:alertId` |
-| GET | `/api/alerts/:alertId/investigation` |
-| GET | `/api/investigations/:id` |
-| GET | `/api/investigations/:id/export` |
-| POST | `/api/investigate` |
-| GET | `/api/dashboard/meta` |
-| POST | `/api/dashboard/query` |
-| GET | `/api/dashboard/filters` |
+## Chat
 
 ### `POST /v1/chat/completions`
 
@@ -98,28 +99,8 @@ Includes nested engine health, `gemini`, `langfuse`.
   "messages": [{ "role": "user", "content": "…" }],
   "stream": false,
   "investigationId": "optional",
-  "alertId": "optional",
-  "sessionId": "optional"
+  "alertId": "optional"
 }
 ```
 
-1. Dashboard intent when geo/OS/format filters are detected (optional explicit dates)
-2. Otherwise resolve an investigation
-3. Narrate from evidence only
-
-Also: `GET /v1/models`.
-
-## Investigation response fields
-
-| Field | Purpose |
-|-------|---------|
-| `alert` | Metric, window, severity |
-| `decomposition` | Revenue-identity factors |
-| `segments` | Top dimension drivers |
-| `ruledOut` | Checked and cleared factors |
-| `diagnosis` | Short text + citations |
-| `trace` | Ordered steps |
-| `seasonality` / `waterfall` / `counterfactual` / `hypotheses` | RCA extras |
-| `evidence.hash` | Content hash over sources |
-
-Schema: [`packages/contracts/investigation.schema.json`](../packages/contracts/investigation.schema.json).
+OpenAI-compatible; used by in-app chat and LibreChat.

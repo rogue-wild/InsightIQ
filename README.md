@@ -1,6 +1,6 @@
 # InsightIQ
 
-ClickHouse-native anomaly detection and automated root-cause analysis for large-scale ad-tech event streams. A reactive cascade inside ClickHouse turns raw events into noise-filtered alerts with dimension-level attribution; the app layer investigates and narrates that evidence in plain English.
+ClickHouse-native anomaly detection and automated root-cause analysis for large-scale ad-tech event streams. A reactive cascade inside ClickHouse turns raw events into noise-filtered alerts with dimension-level attribution; the Node API investigates and narrates that evidence in plain English.
 
 **Documentation:** [docs/README.md](docs/README.md) · **Native pipeline:** [docs/pipeline.md](docs/pipeline.md)
 
@@ -13,13 +13,10 @@ In the reference dataset, noise flooring concentrates signal from a large candid
 ## Quick start
 
 ```bash
-# Terminal 1 — Engine
-cd apps/engine && go build -o bin/engine . && ./bin/engine
-
-# Terminal 2 — API
+# Terminal 1 — API (RCA engine in-process)
 cd apps/api && npm install && npm run dev
 
-# Terminal 3 — Web
+# Terminal 2 — Web
 cd apps/web && npm install && npm run dev
 ```
 
@@ -27,7 +24,6 @@ cd apps/web && npm install && npm run dev
 |---------|-----|
 | Web | http://localhost:5173 |
 | API | http://localhost:4000 |
-| Engine | http://localhost:4100 |
 
 `apps/web/.env`:
 
@@ -38,13 +34,13 @@ VITE_LIBRECHAT_URL=http://localhost:3080
 
 See [docs/setup.md](docs/setup.md) for ClickHouse, Gemini, and Langfuse configuration.
 
-**Public demo:** [docs/deploy.md](docs/deploy.md) — Railway (engine + API) + Vercel (web), ClickHouse Cloud + Langfuse Cloud unchanged.
+**Public demo:** [docs/deploy.md](docs/deploy.md) — one Railway API service + Vercel web.
 
 ## Capabilities
 
 1. **Detect** — seasonality-aware, noise-floored Z-score alerts from `alerts_live` (daily or hourly wall)
 2. **Attribute** — multi-dimensional contributors + plain-language `alert_observations` computed in ClickHouse
-3. **Investigate** — baseline, metric tree, segments, seasonality, counterfactual (Go engine)
+3. **Investigate** — baseline, metric tree, segments, seasonality, counterfactual (Node engine)
 4. **Narrate** — LLM explains engine evidence only
 5. **Export** — investigation bundle with trace and evidence hash
 
@@ -61,14 +57,14 @@ Details and SQL patterns: [docs/pipeline.md](docs/pipeline.md).
 ## Repository
 
 ```
-apps/web/          Dashboard, alerts, investigation, chat
-apps/api/          REST, Gemini, OpenAI-compatible chat, Langfuse
-apps/engine/       Go ClickHouse investigation engine
-packages/contracts Investigation schema
-infra/clickhouse/  View-layer SQL reference
-infra/librechat/   LibreChat config
-docs/              Project documentation
-scripts/           Investigation export CLI
+apps/web/              Dashboard, alerts, investigation, chat
+apps/api/              REST, in-process RCA, Gemini, chat, Langfuse
+apps/api/src/engine/   ClickHouse investigation engine
+packages/contracts     Investigation schema
+infra/clickhouse/      View-layer SQL reference
+infra/librechat/       LibreChat config
+docs/                  Project documentation
+scripts/               Investigation export CLI
 ```
 
 | Doc | Description |

@@ -1,6 +1,10 @@
-# Railway: set service Root Directory to apps/api
-# Set ENGINE_URL to the private engine URL, e.g.:
-#   http://${{engine.RAILWAY_PRIVATE_DOMAIN}}:${{engine.PORT}}
+# Railway: one service for InsightIQ (API + in-process RCA).
+# Settings → Root Directory = apps/api
+# Settings → Builder = Dockerfile
+# Settings → Networking → Generate Domain
+# Required vars: CLICKHOUSE_*, optional GEMINI_*, LANGFUSE_*
+# Do not set ENGINE_URL.
+
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"

@@ -3,56 +3,47 @@
 Target layout:
 
 ```
-Browser → Vercel (web) → Railway (API, public) → Railway private network (engine) → ClickHouse Cloud
+Browser → Vercel (web) → Railway (API + in-process RCA) → ClickHouse Cloud
                               ↘ Gemini + Langfuse Cloud (optional)
 ```
 
-Keep ClickHouse Cloud and Langfuse Cloud as they are. Do not put ClickHouse credentials in the web app.
+One Railway service runs Express **and** the ClickHouse investigation engine (ported from Go into `apps/api/src/engine`).
 
 | Piece | Host | Public? |
 |-------|------|---------|
 | Web | Vercel | Yes — **demo link** |
-| API | Railway | Yes — generate a public domain |
-| Engine | Railway | No public domain — private only |
+| API (+ RCA engine) | Railway | Yes — generate a public domain |
 | ClickHouse | ClickHouse Cloud | Existing |
 | Langfuse | Langfuse Cloud | Existing |
 
-Dockerfiles live at `apps/engine/Dockerfile` and `apps/api/Dockerfile`.
+Dockerfile: `apps/api/Dockerfile`.
 
 ---
 
 ## 0. Prerequisites
 
-- [Railway](https://railway.app) account + [Railway CLI](https://docs.railway.com/guides/cli) optional (`railway login`)
+- [Railway](https://railway.app) account
 - [Vercel](https://vercel.com) (GitHub import or CLI)
 - ClickHouse Cloud credentials already working locally
 - Gemini + Langfuse keys if you want narration / traces
 
 ---
 
-## 1. Railway project — two services
+## 1. Railway — single `api` service
 
-Create one Railway **project** (e.g. `insightiq`) with two services from the same GitHub repo.
+Create one Railway **project** with **one** service from the GitHub repo.
 
-**Do not deploy from the repo root.** If Railpack analyzes `./apps`, `./docs`, `./README.md` and says it “could not determine how to build the app”, the service **Root Directory** is still `/` (monorepo root). Fix that before anything else.
+**Do not deploy from the repo root.** If Railpack analyzes `./apps`, `./docs`, … and fails, Root Directory is still `/`.
 
-For **each** service → **Settings**:
+Service **Settings**:
 
-1. **Root Directory** → `apps/engine` or `apps/api` (not blank / not `/`)
-2. **Builder** → **Dockerfile** (not Railpack / Nixpacks)
-3. **Dockerfile path** → `Dockerfile` (relative to that root)
-4. Redeploy
+1. **Root Directory** → `apps/api`
+2. **Builder** → **Dockerfile** (not Railpack)
+3. **Dockerfile path** → `Dockerfile`
+4. **Networking** → **Generate Domain**
+5. Healthcheck path → `/health`
 
-### Service A — `engine`
-
-| Setting | Value |
-|---------|--------|
-| Root Directory | `apps/engine` |
-| Builder | **Dockerfile** (not Railpack) |
-| Dockerfile path | `Dockerfile` |
-| Public networking | **Off** (no domain) |
-
-Variables:
+### Variables
 
 ```bash
 CLICKHOUSE_HOST=your.host.clickhouse.cloud
@@ -62,37 +53,26 @@ CLICKHOUSE_PASSWORD=***
 CLICKHOUSE_DATABASE=insightiq
 CLICKHOUSE_SECURE=true
 CLICKHOUSE_LOG_QUERIES=true
-# Do not set ENGINE_PORT — Railway injects PORT; the engine listens on it.
-```
 
-Health check path: `/health` (also in `apps/engine/railway.toml`).
-
-### Service B — `api`
-
-| Setting | Value |
-|---------|--------|
-| Root Directory | `apps/api` |
-| Builder | **Dockerfile** (not Railpack) |
-| Dockerfile path | `Dockerfile` |
-| Public networking | **On** — Generate Domain |
-
-Variables:
-
-```bash
 GEMINI_API_KEY=***
 GEMINI_MODEL=gemini-flash-lite-latest
 LANGFUSE_PUBLIC_KEY=pk-***
 LANGFUSE_SECRET_KEY=sk-***
 LANGFUSE_BASE_URL=https://jp.cloud.langfuse.com
-
-# Private URL to the engine service (names must match your Railway service name).
-# Prefer Railway variable references in the dashboard:
-ENGINE_URL=http://${{engine.RAILWAY_PRIVATE_DOMAIN}}:${{engine.PORT}}
 ```
 
-If the engine service is named differently (e.g. `insightiq-engine`), use that name in `${{...}}`.
+Do **not** set `ENGINE_URL` — there is no separate engine service.
 
-After deploy, copy the API public URL, e.g. `https://api-production-xxxx.up.railway.app`.
+### Migrating from the old two-service setup
+
+If you already deployed separate `engine` + `api` services:
+
+1. On **api**: add all `CLICKHOUSE_*` variables (same values the old engine used)
+2. On **api**: delete `ENGINE_URL` if present
+3. Confirm api **Root Directory** = `apps/api`, **Builder** = Dockerfile
+4. Redeploy **api**
+5. Delete the old **engine** Railway service (no longer used)
+6. Keep Vercel `VITE_API_URL` pointed at the **api** public domain (unchanged if the URL stayed the same)
 
 Smoke test:
 
@@ -101,70 +81,27 @@ curl -s https://YOUR-API.up.railway.app/health
 curl -s 'https://YOUR-API.up.railway.app/api/alerts?granularity=day' | head -c 400
 ```
 
-`health` should show the engine reachable. If `engine` is null/down, fix `ENGINE_URL` and private networking (both services in the **same project**).
+`health.clickhouse.ok` should be `true`.
 
 ---
 
-## 2. CLI alternative (optional)
-
-```bash
-# From apps/engine — create/link service, set vars, deploy
-cd apps/engine
-railway link          # select project + engine service
-railway variables set CLICKHOUSE_HOST=... CLICKHOUSE_PASSWORD=... # etc.
-railway up
-
-cd ../api
-railway link          # same project, api service
-railway variables set GEMINI_API_KEY=... LANGFUSE_PUBLIC_KEY=... LANGFUSE_SECRET_KEY=...
-# Set ENGINE_URL in the Railway dashboard with ${{engine.RAILWAY_PRIVATE_DOMAIN}} references
-railway up
-railway domain        # ensure API has a public domain
-```
-
----
-
-## 3. Vercel — web (demo link)
-
-`apps/web/vercel.json` configures Vite SPA rewrites.
+## 2. Vercel — web (demo link)
 
 1. Import the repo → **Root Directory** = `apps/web`
-2. Environment variables (Production):
-   - `VITE_API_URL` = `https://YOUR-API.up.railway.app` (no trailing slash)
-   - `VITE_LIBRECHAT_URL` = optional; leave unset if LibreChat is not hosted
+2. Env: `VITE_API_URL` = `https://YOUR-API.up.railway.app` (no trailing slash)
 3. Deploy → use the `*.vercel.app` URL as the public demo link
 
-CLI:
-
-```bash
-cd apps/web
-vercel link
-vercel env add VITE_API_URL production   # paste Railway API URL
-vercel --prod
-```
-
-`VITE_*` values are **build-time**. Redeploy web whenever the API hostname changes.
+`VITE_*` values are **build-time**. Redeploy web when the API hostname changes.
 
 ---
 
-## 4. Demo checklist
+## 3. Demo checklist
 
 1. Open the Vercel URL → Dashboard loads
 2. **Alerts** → Daily list non-empty
 3. Open one investigation → metric tree + diagnosis + ruled-out
-4. **Export** once (evidence hash / trace)
-5. Chat: ask a follow-up; confirm Langfuse shows a turn if keys are set
-
----
-
-## Cloudflare Pages alternative (web)
-
-```bash
-cd apps/web
-npm ci
-VITE_API_URL=https://YOUR-API.up.railway.app npm run build
-npx wrangler pages deploy dist --project-name=insightiq
-```
+4. **Export** once
+5. Chat follow-up (Gemini + Langfuse optional)
 
 ---
 
@@ -172,33 +109,18 @@ npx wrangler pages deploy dist --project-name=insightiq
 
 ### `Railpack could not determine how to build the app`
 
-Railpack saw the monorepo root. This repo is not a single Node/Go app at `/`.
+Root Directory must be `apps/api`, Builder = **Dockerfile**.
 
-1. Service **Settings → Root Directory** = `apps/engine` or `apps/api`
-2. **Builder** = **Dockerfile**
-3. Trigger a new deploy
+### `health.clickhouse.ok` is false
 
-You should see Docker build steps (`FROM golang…` or `FROM node…`), not `Railpack 0.x`.
+Check `CLICKHOUSE_*` secrets and that the Cloud service allows Railway egress.
 
-### API health shows engine down
+### Alerts empty
 
-- Both services in the **same** Railway project
-- `ENGINE_URL=http://${{engine.RAILWAY_PRIVATE_DOMAIN}}:${{engine.PORT}}` (service name must match)
-- Engine has **no** requirement for a public domain
-
-## Ops notes
-
-| Topic | Guidance |
-|-------|----------|
-| Private engine | No public domain on `engine`; API talks over Railway private network |
-| CORS | API uses open `cors()` — fine for a separate Vercel origin |
-| Secrets | Never put ClickHouse or Gemini keys in `VITE_*` |
-| PORT | Railway injects `PORT`; both Docker images honor it |
-| Sleep / cold start | On trial plans, wake latency can add a few seconds — hit `/health` before a live demo |
-| LibreChat | Optional; not required for Alerts → Investigation → in-app Chat |
+Confirm `alerts_live` has rows in ClickHouse (`abs(zscore) > 3`).
 
 ---
 
 ## Local reference
 
-See [setup.md](./setup.md) for local `.env` shapes. Deploy variables should match the same ClickHouse Cloud database you validated locally.
+See [setup.md](./setup.md). RCA code lives in `apps/api/src/engine/`.

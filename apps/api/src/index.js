@@ -6,35 +6,48 @@ import {
   startActiveObservation,
 } from '@langfuse/tracing'
 import { flushLangfuse } from './instrumentation.js'
+import { createClickHouse, createEngine, queryMaps } from './engine/index.js'
 
 const app = express()
 const port = Number(process.env.PORT || 4000)
 const geminiKey = process.env.GEMINI_API_KEY || ''
 const geminiModel = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest'
-const engineUrl = (process.env.ENGINE_URL || 'http://127.0.0.1:4100').replace(/\/$/, '')
 const langfuseEnabled = Boolean(
   process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY,
 )
 
+/** @type {Awaited<ReturnType<typeof createEngine>> | null} */
+let engine = null
 const invCache = new Map()
 
 app.use(cors())
 app.use(express.json({ limit: '1mb' }))
 
+function requireEngine(_req, res, next) {
+  if (!engine) return res.status(503).json({ error: 'engine_not_ready' })
+  next()
+}
+
 app.get('/health', async (_req, res) => {
-  let engine = null
+  let clickhouse = { ok: false }
   try {
-    engine = await fetchJSON(`${engineUrl}/health`)
+    if (engine?.client) {
+      const rows = await queryMaps(engine.client, 'SELECT count() AS n FROM alerts_live')
+      clickhouse = {
+        ok: true,
+        database: process.env.CLICKHOUSE_DATABASE || 'insightiq',
+        alerts: Number(rows?.[0]?.n || 0),
+      }
+    }
   } catch (err) {
-    engine = { ok: false, error: err.message }
+    clickhouse = { ok: false, error: err.message }
   }
   res.json({
-    ok: true,
+    ok: Boolean(engine) && clickhouse.ok,
     service: 'insightiq-api',
     gemini: Boolean(geminiKey),
     model: geminiKey ? geminiModel : null,
-    engineUrl,
-    engine,
+    clickhouse,
     langfuse: langfuseEnabled,
     langfuseBaseUrl: process.env.LANGFUSE_BASE_URL || null,
   })
@@ -46,21 +59,21 @@ function alertsGranularityQuery(req) {
   return 'day'
 }
 
-app.get('/api/alerts', async (req, res) => {
+app.get('/api/alerts', requireEngine, async (req, res) => {
   try {
     const granularity = alertsGranularityQuery(req)
-    const live = await fetchJSON(`${engineUrl}/alerts?granularity=${encodeURIComponent(granularity)}`)
+    const live = await engine.detectAlerts(granularity)
     res.json(Array.isArray(live) ? live : [])
   } catch (err) {
-    console.error('engine alerts failed', err.message)
+    console.error('alerts failed', err.message)
     res.status(502).json({ error: 'alerts_unavailable', detail: err.message })
   }
 })
 
-app.get('/api/alerts/:alertId', async (req, res) => {
+app.get('/api/alerts/:alertId', requireEngine, async (req, res) => {
   try {
     const granularity = alertsGranularityQuery(req)
-    const list = await fetchJSON(`${engineUrl}/alerts?granularity=${encodeURIComponent(granularity)}`)
+    const list = await engine.detectAlerts(granularity)
     const alert = (list || []).find((a) => a.id === req.params.alertId)
     if (!alert) return res.status(404).json({ error: 'alert_not_found' })
     res.json(alert)
@@ -70,7 +83,7 @@ app.get('/api/alerts/:alertId', async (req, res) => {
   }
 })
 
-app.get('/api/alerts/:alertId/investigation', async (req, res) => {
+app.get('/api/alerts/:alertId/investigation', requireEngine, async (req, res) => {
   try {
     const inv = await investigationForAlert(req.params.alertId)
     if (!inv) return res.status(404).json({ error: 'investigation_not_found' })
@@ -81,68 +94,34 @@ app.get('/api/alerts/:alertId/investigation', async (req, res) => {
   }
 })
 
-app.get('/api/investigations/:investigationId', async (req, res) => {
+app.get('/api/investigations/:investigationId', requireEngine, async (req, res) => {
   const id = req.params.investigationId
   if (invCache.has(id)) return res.json(invCache.get(id))
   try {
-    const inv = await fetchJSON(`${engineUrl}/investigations/${id}`)
-    invCache.set(id, inv)
+    const inv = await engine.getInvestigation(id)
+    invCache.set(inv.id || id, inv)
     return res.json(inv)
   } catch (err) {
-    // Engine may 404 on cold cache; rebuild via POST /investigate from id.
-    try {
-      const body = requestFromInvestigationId(id)
-      if (body) {
-        const inv = await runEngineInvestigate(body)
-        return res.json(inv)
-      }
-    } catch (rebuildErr) {
-      console.warn('investigation rebuild failed', rebuildErr.message || err.message)
-    }
+    console.warn('investigation failed', err.message)
+    return res.status(404).json({ error: 'investigation_not_found', detail: err.message })
   }
-  return res.status(404).json({ error: 'investigation_not_found' })
 })
 
-app.get('/api/investigations/:investigationId/export', async (req, res) => {
+app.get('/api/investigations/:investigationId/export', requireEngine, async (req, res) => {
   const id = req.params.investigationId
   try {
-    try {
-      const bundle = await fetchJSON(`${engineUrl}/investigations/${encodeURIComponent(id)}/export`)
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="${id}-export.json"`,
-      )
-      return res.json(bundle)
-    } catch (err) {
-      console.warn('engine export failed, building locally', err.message)
-    }
-    let inv = invCache.get(id)
-    if (!inv) {
-      const body = requestFromInvestigationId(id)
-      if (body) inv = await runEngineInvestigate(body)
-    }
-    if (!inv) return res.status(404).json({ error: 'investigation_not_found' })
-    const bundle = {
-      exportedAt: new Date().toISOString(),
-      purpose: 'investigation-export',
-      investigation: inv,
-      immutableTrace: inv.trace || [],
-      evidenceHash: inv.evidence?.hash || null,
-      evidence: inv.evidence || null,
-      seasonality: inv.seasonality || null,
-      waterfall: inv.waterfall || [],
-      counterfactual: inv.counterfactual || null,
-      hypotheses: inv.hypotheses || [],
-    }
+    const bundle = await engine.exportInvestigation(id)
+    const inv = bundle.investigation
+    if (inv?.id) invCache.set(inv.id, inv)
     res.setHeader('Content-Disposition', `attachment; filename="${id}-export.json"`)
-    res.json(bundle)
+    return res.json(bundle)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'export_failed', detail: err.message })
   }
 })
 
-app.post('/api/investigate', async (req, res) => {
+app.post('/api/investigate', requireEngine, async (req, res) => {
   try {
     const inv = await startActiveObservation(
       'investigate-alert',
@@ -174,36 +153,32 @@ app.post('/api/investigate', async (req, res) => {
   }
 })
 
-app.get('/api/dashboard/meta', async (_req, res) => {
+app.get('/api/dashboard/meta', requireEngine, async (_req, res) => {
   try {
-    res.json(await fetchJSON(`${engineUrl}/dashboard/meta`))
+    res.json(await engine.getDashboardMeta())
   } catch (err) {
     res.status(502).json({ error: 'dashboard_meta_failed', detail: err.message })
   }
 })
 
-app.post('/api/dashboard/query', async (req, res) => {
+app.post('/api/dashboard/query', requireEngine, async (req, res) => {
   try {
-    const out = await fetchJSON(`${engineUrl}/dashboard/query`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body || {}),
-    })
-    res.json(out)
+    res.json(await engine.queryDashboard(req.body || {}))
   } catch (err) {
     console.error(err)
     res.status(502).json({ error: 'dashboard_query_failed', detail: err.message })
   }
 })
 
-app.get('/api/dashboard/filters', async (req, res) => {
+app.get('/api/dashboard/filters', requireEngine, async (req, res) => {
   try {
-    const qs = new URLSearchParams({
-      dimension: String(req.query.dimension || ''),
-      start: String(req.query.start || ''),
-      end: String(req.query.end || ''),
-    }).toString()
-    res.json(await fetchJSON(`${engineUrl}/dashboard/filters?${qs}`))
+    res.json(
+      await engine.getDashboardFilters({
+        dimension: String(req.query.dimension || ''),
+        start: String(req.query.start || ''),
+        end: String(req.query.end || ''),
+      }),
+    )
   } catch (err) {
     res.status(502).json({ error: 'dashboard_filters_failed', detail: err.message })
   }
@@ -593,7 +568,8 @@ async function fetchLiveDataRange() {
   if (liveRangeCache.value && Date.now() - liveRangeCache.at < 60_000) {
     return liveRangeCache.value
   }
-  const meta = await fetchJSON(`${engineUrl}/dashboard/meta`)
+  if (!engine) throw new Error('engine_not_ready')
+  const meta = await engine.getDashboardMeta()
   const range = meta?.dataRange || null
   liveRangeCache = { at: Date.now(), value: range }
   return range
@@ -653,11 +629,8 @@ async function fetchDashboardEvidence(slice, question = '') {
         limit: 10,
       }
       obs.update({ input: { filters: body.filters, window, granularity: body.granularity } })
-      const out = await fetchJSON(`${engineUrl}/dashboard/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      if (!engine) throw new Error('engine_not_ready')
+      const out = await engine.queryDashboard(body)
       const breakdown = {}
       for (const dim of slice.dimensions || []) {
         breakdown[dim] = (out.tables?.[dim] || []).slice(0, 5)
@@ -682,7 +655,8 @@ let defaultInvestigationPromise = null
 async function getDefaultInvestigation() {
   if (!defaultInvestigationPromise) {
     defaultInvestigationPromise = (async () => {
-      const alerts = await fetchJSON(`${engineUrl}/alerts`)
+      if (!engine) throw new Error('engine_not_ready')
+      const alerts = await engine.detectAlerts('day')
       const pick =
         (Array.isArray(alerts) && alerts.find((a) => a.advertiserId === 'adv_0000')) ||
         (Array.isArray(alerts) && alerts[0])
@@ -731,35 +705,27 @@ async function investigationForAlert(alertId) {
 }
 
 async function runEngineInvestigate(body) {
-  const inv = await fetchJSON(`${engineUrl}/investigate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+  if (!engine) throw new Error('engine_not_ready')
+  const inv = await engine.runInvestigation(body || {})
   invCache.set(inv.id, inv)
   return inv
 }
 
 /** Parse inv-{uuid} or inv-{metric}-{YYYYMMDD} into an investigate request body. */
 function requestFromInvestigationId(id) {
-  const raw = String(id || '')
-  const uuid = raw.replace(/^inv-/i, '')
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid)) {
-    return { alertId: uuid }
-  }
-  const m = raw.match(/^inv-(.+)-(\d{8})$/)
-  if (!m) return null
-  const metric = m[1]
-  const y = m[2].slice(0, 4)
-  const mo = m[2].slice(4, 6)
-  const d = m[2].slice(6, 8)
-  const day = `${y}-${mo}-${d}`
-  return {
-    alertId: `alert-${metric}-${day}`,
-    metric,
-    windowStart: `${day}T00:00:00Z`,
-    windowEnd: `${day}T23:59:59Z`,
-    baselineKind: 'same_hour_4w_seasonality',
+  try {
+    if (!engine) {
+      // Fallback parser when engine not ready (startup race).
+      const raw = String(id || '')
+      const uuid = raw.replace(/^inv-/i, '')
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid)) {
+        return { alertId: uuid }
+      }
+      return null
+    }
+    return engine.requestFromInvestigationID(id)
+  } catch {
+    return null
   }
 }
 
@@ -770,15 +736,11 @@ async function resolveInvestigation(text, opts = {}) {
   if (investigationId) {
     if (invCache.has(investigationId)) return invCache.get(investigationId)
     try {
-      const inv = await fetchJSON(`${engineUrl}/investigations/${investigationId}`)
-      invCache.set(inv.id || investigationId, inv)
-      return inv
-    } catch {
-      /* fall through to rebuild */
-    }
-    try {
-      const body = requestFromInvestigationId(investigationId)
-      if (body) return await runEngineInvestigate(body)
+      if (engine) {
+        const inv = await engine.getInvestigation(investigationId)
+        invCache.set(inv.id || investigationId, inv)
+        return inv
+      }
     } catch {
       /* fall through */
     }
@@ -1018,17 +980,32 @@ async function fetchJSON(url, options) {
   return res.json()
 }
 
-app.listen(port, () => {
+async function main() {
+  const client = await createClickHouse()
+  engine = createEngine(client)
   console.log(
-    `InsightIQ API listening on http://localhost:${port} (gemini=${geminiKey ? geminiModel : 'off'}, engine=${engineUrl}, langfuse=${langfuseEnabled ? 'on' : 'off'})`,
+    `connected to ClickHouse database=${process.env.CLICKHOUSE_DATABASE || 'insightiq'}`,
   )
+  app.listen(port, () => {
+    console.log(
+      `InsightIQ API listening on http://localhost:${port} (gemini=${geminiKey ? geminiModel : 'off'}, engine=in-process, langfuse=${langfuseEnabled ? 'on' : 'off'})`,
+    )
+  })
+}
+
+main().catch((err) => {
+  console.error('failed to start API', err)
+  process.exit(1)
 })
 
-process.on('SIGTERM', async () => {
+async function shutdown() {
   await flushLangfuse()
+  try {
+    await engine?.client?.close?.()
+  } catch {
+    /* ignore */
+  }
   process.exit(0)
-})
-process.on('SIGINT', async () => {
-  await flushLangfuse()
-  process.exit(0)
-})
+}
+process.on('SIGTERM', shutdown)
+process.on('SIGINT', shutdown)

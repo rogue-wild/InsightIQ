@@ -2,7 +2,7 @@
 
 InsightIQ builds a **reactive cascade inside ClickHouse Cloud**: raw ad events are ingested, rolled up, baselined with seasonality, scored for anomalies, and attributed across dimensions — without shipping event rows to external analytics workers for those steps.
 
-The application layer (Go engine, Node API, React UI) reads this pre-computed layer to investigate further and narrate evidence-backed answers.
+The application layer (Node API with in-process RCA, React UI) reads this pre-computed layer to investigate further and narrate evidence-backed answers.
 
 ## Executive summary
 
@@ -202,8 +202,7 @@ ORDER BY abs(delta) DESC;
 
 | Consumer | Reads |
 |----------|--------|
-| Go engine | `alerts_live`, contributors, observations, `metric_hourly_snapshot` / `agg_hourly` |
-| Node API | Proxies engine; narrates evidence with Gemini |
+| Node API (`src/engine`) | `alerts_live`, contributors, observations, `metric_hourly_snapshot` / `agg_hourly`; narrates with Gemini |
 | Web UI | Dashboard, alert wall, investigation, chat |
 
 The LLM never receives raw event dumps — only structured evidence produced by ClickHouse + the engine.

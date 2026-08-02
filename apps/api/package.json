@@ -8,6 +8,7 @@
     "start": "node src/index.js"
   },
   "dependencies": {
+    "@clickhouse/client": "^1.23.1",
     "@langfuse/client": "^5.10.0",
     "@langfuse/otel": "^5.10.0",
     "@langfuse/tracing": "^5.10.0",

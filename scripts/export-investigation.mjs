@@ -9,11 +9,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-const ENGINE = (process.env.ENGINE_URL || 'http://127.0.0.1:4100').replace(/\/$/, '')
 const API = (process.env.API_URL || 'http://127.0.0.1:4000').replace(/\/$/, '')
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function arg(name, fallback = '') {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
@@ -47,11 +43,7 @@ function normalizeAlertId(raw) {
 }
 
 async function listAlerts() {
-  try {
-    return await fetchJSON(`${API}/api/alerts`)
-  } catch {
-    return fetchJSON(`${ENGINE}/alerts`)
-  }
+  return fetchJSON(`${API}/api/alerts`)
 }
 
 async function investigate(alertId) {
@@ -63,18 +55,11 @@ async function investigate(alertId) {
     })
   } catch (apiErr) {
     const msg = apiErr.message || String(apiErr)
-    if (!UUID_RE.test(alertId)) {
-      throw new Error(
-        [`Investigate failed for "${alertId}".`, 'List UUIDs with --list', `Detail: ${msg}`].join(
-          '\n',
-        ),
-      )
-    }
-    return fetchJSON(`${ENGINE}/investigate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ alertId }),
-    })
+    throw new Error(
+      [`Investigate failed for "${alertId}".`, 'List UUIDs with --list', `Detail: ${msg}`].join(
+        '\n',
+      ),
+    )
   }
 }
 
@@ -111,7 +96,7 @@ async function main() {
   if (hasFlag('list')) {
     const alerts = await listAlerts()
     if (!Array.isArray(alerts) || alerts.length === 0) {
-      console.error('No alerts returned. Check engine/API and alerts_live.')
+      console.error('No alerts returned. Check API and alerts_live.')
       process.exit(1)
     }
     console.log(`Found ${alerts.length} alerts:\n`)
@@ -137,11 +122,7 @@ async function main() {
     investigationId = inv.id
   } else if (investigationId) {
     console.log(`Loading investigationId=${investigationId}…`)
-    try {
-      inv = await fetchJSON(`${API}/api/investigations/${encodeURIComponent(investigationId)}`)
-    } catch {
-      inv = await fetchJSON(`${ENGINE}/investigations/${encodeURIComponent(investigationId)}`)
-    }
+    inv = await fetchJSON(`${API}/api/investigations/${encodeURIComponent(investigationId)}`)
   } else {
     console.error('Missing --alertId or --investigationId. Use --list to discover UUIDs.')
     process.exit(1)
