@@ -323,7 +323,13 @@ app.post('/v1/chat/completions', async (req, res) => {
     res.json(payload)
   } catch (err) {
     console.error('chat completions error', err)
-    res.status(500).json({ error: { message: err.message || 'chat_failed' } })
+    // Last resort: never surface opaque upstream auth errors without a usable reply.
+    const message = String(err?.message || 'chat_failed')
+    const soft =
+      /unauthorized|forbidden|langfuse|gemini/i.test(message)
+        ? 'Chat tracing or narration hit an auth error. Check GEMINI_API_KEY and Langfuse keys on the API service. Evidence-only answers still work once keys are valid.'
+        : message
+    res.status(500).json({ error: { message: soft } })
   }
 })
 
@@ -868,107 +874,146 @@ function fmtDelta(d) {
   return `${sign}${Number(d.deltaPct).toFixed(1)}%`
 }
 
+function safeGenerationUpdate(generation, patch) {
+  try {
+    generation?.update?.(patch)
+  } catch (err) {
+    console.warn('langfuse generation.update failed:', err?.message || err)
+  }
+}
+
+async function callGeminiNarration(system, userPrompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent?key=${encodeURIComponent(geminiKey)}`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 512 },
+    }),
+  })
+  const bodyText = await response.text()
+  if (!response.ok) {
+    const err = new Error(`gemini_http_${response.status}`)
+    err.status = response.status
+    err.body = bodyText.slice(0, 500)
+    throw err
+  }
+  let data
+  try {
+    data = JSON.parse(bodyText)
+  } catch {
+    throw new Error('gemini_invalid_json')
+  }
+  const textOut = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('\n')
+  return {
+    text: textOut?.trim() || '',
+    usage: data?.usageMetadata || {},
+  }
+}
+
 async function narrateFromEvidence(question, inv, extraEvidence = null) {
   if (!inv && !extraEvidence) return fallbackNarration(question, inv, extraEvidence)
   if (!geminiKey) return fallbackNarration(question, inv, extraEvidence)
 
-  return startActiveObservation(
-    'narrate-with-gemini',
-    async (generation) => {
-      const isDash = extraEvidence?.kind === 'dashboard' || extraEvidence?.kind === 'geo'
-      const evidence = isDash
-        ? {
-            kind: extraEvidence.kind,
-            label: extraEvidence.label,
-            filters: extraEvidence.filters,
-            date: formatHumanWindow(extraEvidence.window),
-            windowISO: extraEvidence.window,
-            totals: {
-              revenue: roundNice(extraEvidence.totals?.revenue),
-              requests: roundNice(extraEvidence.totals?.requests, 0),
-              fill_rate: roundNice(extraEvidence.totals?.fill_rate, 4),
-              ecpm: roundNice(extraEvidence.totals?.ecpm),
-            },
-            deltas: extraEvidence.deltas,
-          }
-        : {
-            id: inv.id,
-            status: inv.status,
-            alert: inv.alert,
-            decomposition: inv.decomposition,
-            segments: (inv.segments || []).slice(0, 5),
-            ruledOut: inv.ruledOut,
-            diagnosis: {
-              text: inv.diagnosis?.text,
-              citations: (inv.diagnosis?.citations || []).slice(0, 6),
-            },
-          }
-
-      const system = [
-        'You are InsightIQ, an automated analytics narrator.',
-        'You MUST only use numbers and facts present in the provided evidence JSON.',
-        'Never invent metrics, segments, or percentages.',
-        isDash
-          ? 'This evidence is a dashboard query result for the exact filters listed. Answer using totals.revenue / totals.requests / etc. for that filter intersection. Do not ignore filters like os_version.'
-          : 'This evidence is a root-cause investigation package. Summarize diagnosis + top 2-3 segments only.',
-        'Keep the answer to 2-4 short sentences.',
-        'Format dates as human calendar dates (e.g. 21 Jun 2026). Never paste raw ISO timestamps like 2026-06-21T00:00:00.000Z.',
-        'Round revenue to 2 decimals. Do not print floating-point noise.',
-      ].join(' ')
-
-      const userPrompt = `User question: ${question || 'Explain this investigation.'}\n\nEvidence JSON:\n${JSON.stringify(evidence, null, 2)}`
-      generation.update({
-        input: [
-          { role: 'system', content: system },
-          { role: 'user', content: userPrompt },
-        ],
-        model: geminiModel,
-        metadata: {
-          evidenceKind: isDash ? 'dashboard' : 'investigation',
-          investigationId: inv?.id || null,
-          filters: extraEvidence?.filters || null,
+  const isDash = extraEvidence?.kind === 'dashboard' || extraEvidence?.kind === 'geo'
+  const evidence = isDash
+    ? {
+        kind: extraEvidence.kind,
+        label: extraEvidence.label,
+        filters: extraEvidence.filters,
+        date: formatHumanWindow(extraEvidence.window),
+        windowISO: extraEvidence.window,
+        totals: {
+          revenue: roundNice(extraEvidence.totals?.revenue),
+          requests: roundNice(extraEvidence.totals?.requests, 0),
+          fill_rate: roundNice(extraEvidence.totals?.fill_rate, 4),
+          ecpm: roundNice(extraEvidence.totals?.ecpm),
         },
-      })
-
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${encodeURIComponent(geminiKey)}`
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 512 },
-        }),
-      })
-
-      if (!response.ok) {
-        const body = await response.text()
-        console.error('Gemini error', response.status, body.slice(0, 500))
-        const fallback = `${fallbackNarration(question, inv, extraEvidence)}\n\n_(Gemini unavailable — showed evidence fallback.)_`
-        generation.update({
-          output: fallback,
-          level: 'ERROR',
-          statusMessage: `gemini_http_${response.status}`,
-        })
-        return fallback
+        deltas: extraEvidence.deltas,
+      }
+    : {
+        id: inv.id,
+        status: inv.status,
+        alert: inv.alert,
+        decomposition: inv.decomposition,
+        segments: (inv.segments || []).slice(0, 5),
+        ruledOut: inv.ruledOut,
+        diagnosis: {
+          text: inv.diagnosis?.text,
+          citations: (inv.diagnosis?.citations || []).slice(0, 6),
+        },
       }
 
-      const data = await response.json()
-      const textOut = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('\n')
-      const reply = textOut?.trim() || fallbackNarration(question, inv, extraEvidence)
-      const usage = data?.usageMetadata || {}
-      generation.update({
-        output: reply,
-        usageDetails: {
-          input: usage.promptTokenCount || 0,
-          output: usage.candidatesTokenCount || 0,
-          total: usage.totalTokenCount || 0,
-        },
-      })
-      return reply
-    },
-    { asType: 'generation' },
-  )
+  const system = [
+    'You are InsightIQ, an automated analytics narrator.',
+    'You MUST only use numbers and facts present in the provided evidence JSON.',
+    'Never invent metrics, segments, or percentages.',
+    isDash
+      ? 'This evidence is a dashboard query result for the exact filters listed. Answer using totals.revenue / totals.requests / etc. for that filter intersection. Do not ignore filters like os_version.'
+      : 'This evidence is a root-cause investigation package. Summarize diagnosis + top 2-3 segments only.',
+    'Keep the answer to 2-4 short sentences.',
+    'Format dates as human calendar dates (e.g. 21 Jun 2026). Never paste raw ISO timestamps like 2026-06-21T00:00:00.000Z.',
+    'Round revenue to 2 decimals. Do not print floating-point noise.',
+  ].join(' ')
+
+  const userPrompt = `User question: ${question || 'Explain this investigation.'}\n\nEvidence JSON:\n${JSON.stringify(evidence, null, 2)}`
+  const evidenceFallback = () =>
+    `${fallbackNarration(question, inv, extraEvidence)}\n\n_(Gemini unavailable — showed evidence fallback.)_`
+
+  try {
+    return await startActiveObservation(
+      'narrate-with-gemini',
+      async (generation) => {
+        safeGenerationUpdate(generation, {
+          input: [
+            { role: 'system', content: system },
+            { role: 'user', content: userPrompt },
+          ],
+          model: geminiModel,
+          metadata: {
+            evidenceKind: isDash ? 'dashboard' : 'investigation',
+            investigationId: inv?.id || null,
+            filters: extraEvidence?.filters || null,
+          },
+        })
+
+        try {
+          const { text, usage } = await callGeminiNarration(system, userPrompt)
+          const reply = text || fallbackNarration(question, inv, extraEvidence)
+          safeGenerationUpdate(generation, {
+            output: reply,
+            usageDetails: {
+              input: usage.promptTokenCount || 0,
+              output: usage.candidatesTokenCount || 0,
+              total: usage.totalTokenCount || 0,
+            },
+          })
+          return reply
+        } catch (err) {
+          console.error('Gemini error', err.status || '', err.body || err.message || err)
+          const fallback = evidenceFallback()
+          safeGenerationUpdate(generation, {
+            output: fallback,
+            level: 'ERROR',
+            statusMessage: String(err.message || 'gemini_failed').slice(0, 120),
+          })
+          return fallback
+        }
+      },
+      { asType: 'generation' },
+    )
+  } catch (err) {
+    console.warn('narrate observation failed, using evidence fallback:', err?.message || err)
+    try {
+      const { text } = await callGeminiNarration(system, userPrompt)
+      return text || fallbackNarration(question, inv, extraEvidence)
+    } catch (geminiErr) {
+      console.error('Gemini error (no-trace path)', geminiErr.status || '', geminiErr.body || geminiErr.message)
+      return evidenceFallback()
+    }
+  }
 }
 
 async function fetchJSON(url, options) {

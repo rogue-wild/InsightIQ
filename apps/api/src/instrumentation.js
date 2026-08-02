@@ -15,5 +15,10 @@ const provider = new NodeTracerProvider({
 provider.register()
 
 export async function flushLangfuse() {
-  await langfuseSpanProcessor.forceFlush()
+  try {
+    await langfuseSpanProcessor.forceFlush()
+  } catch (err) {
+    // Never fail user requests because tracing export failed (bad keys, 401, etc.).
+    console.warn('langfuse flush failed:', err?.message || err)
+  }
 }
