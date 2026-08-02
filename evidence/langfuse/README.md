@@ -5,16 +5,9 @@
 | File | Purpose |
 |------|---------|
 | `1785643387197-lf-events-export-….csv` | Bulk export of live chat/narrate observations |
-| `SHARE_LINKS.md` | Public per-trace URLs + notes |
+| `SHARE_LINKS.md` | Public session share URL |
 
-## Project-wide share?
-
-**Not available.** Langfuse only public-shares **single traces**. For “whole project” evidence:
-
-1. Commit the CSV/JSON export (done), **and**
-2. Public-share **1–2 key traces** (demo + unseen) via Share → make public
-
-See [SHARE_LINKS.md](./SHARE_LINKS.md).
+Langfuse does not offer a project-wide public link — use the CSV plus shared session/trace URLs. See [SHARE_LINKS.md](./SHARE_LINKS.md).
 
 ## Wiring (in product code)
 
