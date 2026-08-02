@@ -84,6 +84,10 @@ node scripts/export-investigation.mjs --investigationId=inv-<UUID>
 
 Also available in the Investigation UI as **Export** .
 
+## Public demo
+
+To host a shareable URL (Railway engine + API, Vercel web): see [deploy.md](./deploy.md).
+
 ## Verify the ClickHouse cascade
 
 With the `insightiq` schema loaded, sanity-check observations and alert volume:

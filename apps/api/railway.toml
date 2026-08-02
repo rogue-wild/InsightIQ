@@ -1,0 +1,11 @@
+# Railway: set service Root Directory to apps/api
+# Set ENGINE_URL to the private engine URL, e.g.:
+#   http://${{engine.RAILWAY_PRIVATE_DOMAIN}}:${{engine.PORT}}
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"

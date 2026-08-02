@@ -42,10 +42,14 @@ func loadEngineEnv() error {
 }
 
 func main() {
-	// Load apps/engine/.env when present so a foreign cwd (e.g. apps/api) cannot
-	// override listen port via another service's PORT=.
+	// Load apps/engine/.env when present. Prefer ENGINE_PORT so a foreign cwd
+	// (e.g. apps/api) cannot steal the listen port via PORT=; fall back to PORT
+	// for cloud hosts (Railway) that inject it.
 	_ = loadEngineEnv()
-	port := envOr("ENGINE_PORT", "4100")
+	port := envOr("ENGINE_PORT", "")
+	if port == "" {
+		port = envOr("PORT", "4100")
+	}
 
 	conn, err := openClickHouse()
 	if err != nil {

@@ -38,6 +38,8 @@ VITE_LIBRECHAT_URL=http://localhost:3080
 
 See [docs/setup.md](docs/setup.md) for ClickHouse, Gemini, and Langfuse configuration.
 
+**Public demo:** [docs/deploy.md](docs/deploy.md) — Railway (engine + API) + Vercel (web), ClickHouse Cloud + Langfuse Cloud unchanged.
+
 ## Capabilities
 
 1. **Detect** — seasonality-aware, noise-floored Z-score alerts from `alerts_live` (daily or hourly wall)
@@ -74,6 +76,7 @@ scripts/           Investigation export CLI
 | [docs/architecture.md](docs/architecture.md) | System design |
 | [docs/pipeline.md](docs/pipeline.md) | Native ClickHouse cascade |
 | [docs/setup.md](docs/setup.md) | Local setup |
+| [docs/deploy.md](docs/deploy.md) | Public demo (Railway + Vercel) |
 | [docs/data-model.md](docs/data-model.md) | Schema & engines |
 | [docs/api-reference.md](docs/api-reference.md) | HTTP APIs |
 | [docs/product-guide.md](docs/product-guide.md) | UI behavior |
