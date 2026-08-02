@@ -1,5 +1,7 @@
 # Architecture — InsightIQ (InMobi track)
 
+**Team:** 404Duos  
+
 1–2 pager for Click-a-thon evaluation. Detail: [docs/architecture.md](./docs/architecture.md), [docs/pipeline.md](./docs/pipeline.md).
 
 ## Where analysis runs

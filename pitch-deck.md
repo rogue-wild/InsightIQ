@@ -5,9 +5,10 @@ Export this to **`pitch-deck.pdf`** before submission (Google Slides / Keynote /
 ---
 
 ## Slide 1 — Title
-**InsightIQ**  
+**InsightIQ** · Team **404Duos**  
 From alert to answer — automated root-cause analysis inside ClickHouse  
-*Click-a-thon 2026 · InMobi track*
+*Click-a-thon 2026 · InMobi track*  
+Vishnu Bhagwat · Sethukumar J
 
 ---
 
@@ -59,4 +60,5 @@ Alert wall → investigation → diagnosis → chat → Langfuse
 ---
 
 ## Slide 8 — Team & ask
-Team members · demo link · video · thanks
+**404Duos** — Vishnu Bhagwat · Sethukumar J  
+Demo · video · thanks

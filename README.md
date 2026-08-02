@@ -1,4 +1,4 @@
-# InsightIQ
+# 404Duos
 
 ## Track
 **InMobi** — Click-a-thon 2026  
@@ -9,7 +9,7 @@ Problem: *From alert to answer: the automated root-cause analyst*
 
 ## Team Members
 - Vishnu Bhagwat ([@rogue-wild](https://github.com/rogue-wild))
-<!-- Add teammates: - Name (GitHub handle) -->
+- Sethukumar J ([@SethukumarJ](https://github.com/SethukumarJ))
 
 ## What it does
 
@@ -160,7 +160,7 @@ UI: Investigation → **Export**. Place graded outputs under [`evidence/unseen/`
 | Hosted demo | ✅ https://insight-iq-woad.vercel.app |
 | Langfuse wiring + evidence folder | ✅ code + [`evidence/langfuse/`](./evidence/langfuse/) |
 | Demo video (2–3 min) | ⬜ add link above |
-| Pitch deck PDF | ⬜ add [`pitch-deck.pdf`](./pitch-deck.pdf) (draft: [`pitch-deck.md`](./pitch-deck.md)) |
+| Pitch deck PDF | ✅ [`pitch-deck.pdf`](./pitch-deck.pdf) (source: [`pitch-deck.md`](./pitch-deck.md)) |
 | Unseen incident bundle (diagnosis + numbers + trace) | ⬜ when dataset drops → [`evidence/unseen/`](./evidence/unseen/) |
 
 ## License

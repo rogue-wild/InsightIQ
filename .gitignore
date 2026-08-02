@@ -9,8 +9,8 @@ apps/web/node_modules/
 apps/api/.env
 apps/web/.env
 .cursor/
-# Local clone of LibreChat (not part of this product)
 /LibreChat/
-data/*.csv
-data/*.parquet
-!data/samples/
+data/
+exports/
+*.pem
+*.key
