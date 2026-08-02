@@ -158,7 +158,7 @@ UI: Investigation → **Export**. Place graded outputs under [`evidence/unseen/`
 | README (hosted demo + runbook) | ✅ |
 | Architecture | ✅ [ARCHITECTURE.md](./ARCHITECTURE.md) |
 | Hosted demo | ✅ https://insight-iq-woad.vercel.app |
-| Langfuse wiring + evidence folder | ✅ code + [`evidence/langfuse/`](./evidence/langfuse/) |
+| Langfuse wiring + evidence folder | ✅ code + CSV export in [`evidence/langfuse/`](./evidence/langfuse/) (add 1–2 public trace links) |
 | Demo video (2–3 min) | ⬜ add link above |
 | Pitch deck PDF | ✅ [`pitch-deck.pdf`](./pitch-deck.pdf) (source: [`pitch-deck.md`](./pitch-deck.md)) |
 | Unseen incident bundle (diagnosis + numbers + trace) | ⬜ when dataset drops → [`evidence/unseen/`](./evidence/unseen/) |

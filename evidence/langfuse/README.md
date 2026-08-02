@@ -1,38 +1,30 @@
 # Langfuse evidence (InMobi / Click-a-thon)
 
-Judges must not need login to your Langfuse project. For every graded run (especially the **unseen incident** chat/investigation narration):
+## What’s here
 
-## What to put here
+| File | Purpose |
+|------|---------|
+| `1785643387197-lf-events-export-….csv` | Bulk export of live chat/narrate observations |
+| `SHARE_LINKS.md` | Public per-trace URLs + notes |
 
-1. **Public share links** — in Langfuse UI open the trace → **Share** → public link. Paste into `SHARE_LINKS.md`.
-2. **and/or JSON exports** — export the trace JSON and save as:
-   - `chat-<session-or-timestamp>.json`
-   - `investigate-<alertId>.json`
+## Project-wide share?
 
-## Expected trace shape (live wiring)
+**Not available.** Langfuse only public-shares **single traces**. For “whole project” evidence:
 
-From `apps/api` with Langfuse enabled:
+1. Commit the CSV/JSON export (done), **and**
+2. Public-share **1–2 key traces** (demo + unseen) via Share → make public
 
-- Trace / session: in-app chat (`sessionId` from web)
-- Span: `handle-chat-completion`
-  - Retriever or investigate resolve
-  - Generation: `narrate-with-gemini` (model, prompt, tokens, reply)
+See [SHARE_LINKS.md](./SHARE_LINKS.md).
 
-Also: `investigate-alert` spans when `/api/investigate` is called.
+## Wiring (in product code)
 
-## Config (redacted)
-
-See `../../apps/api/.env.example`:
-
-```bash
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_BASE_URL=https://jp.cloud.langfuse.com
-```
+- `apps/api/src/instrumentation.js` — OTEL → Langfuse  
+- `apps/api/src/index.js` — chat / investigate / narrate spans  
+- `apps/api/.env.example` — `LANGFUSE_*` (secrets redacted)
 
 ## Live check
 
 ```bash
 curl -s https://insightiq-production-be0e.up.railway.app/health
-# → "langfuse": true, "langfuseBaseUrl": "https://jp.cloud.langfuse.com"
+# langfuse: true, langfuseBaseUrl: https://jp.cloud.langfuse.com
 ```
