@@ -5,6 +5,7 @@ InsightIQ is a ClickHouse-native analytics control plane for ad-tech event strea
 | Doc | What it covers |
 |-----|----------------|
 | [Architecture](./architecture.md) | System design, request paths, principles |
+| [Submission architecture](../ARCHITECTURE.md) | Click-a-thon 1–2 pager (InMobi) |
 | [Native pipeline](./pipeline.md) | ClickHouse cascade, seasonality baseline, noise-floored Z-score, multi-dim RCA |
 | [Setup & run](./setup.md) | Local environment, ports, credentials |
 | [Deploy (public demo)](./deploy.md) | Railway API (in-process RCA), Vercel web |
