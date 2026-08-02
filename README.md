@@ -90,11 +90,10 @@ Wiring: `apps/api/src/instrumentation.js`, `apps/api/.env.example` (`LANGFUSE_*`
 
 | Evidence | Link |
 |----------|------|
-| Export bundle (diagnosis + numbers + trace + evidence hash) | [`evidence/unseen/inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07-export.json`](./evidence/unseen/inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07-export.json) |
+| Export (−50.3% revenue / requests) | [`evidence/unseen/inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07-export.json`](./evidence/unseen/inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07-export.json) |
+| Export (−12.5% revenue / eCPM) | [`evidence/unseen/inv-b6b57556-9484-d041-33a5-5bab862dfe4d-export.json`](./evidence/unseen/inv-b6b57556-9484-d041-33a5-5bab862dfe4d-export.json) |
 | Notes | [`evidence/unseen/README.md`](./evidence/unseen/README.md) |
-| Live investigation | https://insight-iq-woad.vercel.app/investigations/inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07 |
-
-Evidence hash: `37466a08f1e49bc1ea635bd2e1c62f749fa72f160c2e7f54ba06aac7a02b727c`
+| Live | https://insight-iq-woad.vercel.app/investigations/inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07 · https://insight-iq-woad.vercel.app/investigations/inv-b6b57556-9484-d041-33a5-5bab862dfe4d |
 
 ## How we built it
 

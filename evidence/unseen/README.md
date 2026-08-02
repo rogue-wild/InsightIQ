@@ -1,24 +1,23 @@
-# Unseen / graded incident bundle — 404Duos
+# Unseen / graded incident bundles — 404Duos
 
-System-generated export (not hand-written).
+System-generated exports (not hand-written). Each file includes diagnosis + citations, segments, ruled-out, seasonality, waterfall, counterfactual, hypotheses, immutable `trace[]`, and evidence hash.
 
-## Bundle
+## Bundles
 
-| Field | Value |
-|-------|--------|
-| File | [`inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07-export.json`](./inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07-export.json) |
-| Alert | `b82a676d-5e80-f884-0f1a-78a4b44f9b07` |
-| Investigation | `inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07` |
-| Evidence hash | `37466a08f1e49bc1ea635bd2e1c62f749fa72f160c2e7f54ba06aac7a02b727c` |
-
-Contains: diagnosis + citations, segments, ruled-out, seasonality, waterfall, counterfactual, hypotheses, immutable `trace[]`, evidence lock.
+| Alert | Investigation | Pct | Culprit theme | Export | Evidence hash |
+|-------|---------------|-----|---------------|--------|---------------|
+| `b82a676d-5e80-f884-0f1a-78a4b44f9b07` | `inv-b82a676d-…` | −50.3% | Requests | [`inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07-export.json`](./inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07-export.json) | `37466a08…727c` |
+| `b6b57556-9484-d041-33a5-5bab862dfe4d` | `inv-b6b57556-…` | −12.5% | eCPM | [`inv-b6b57556-9484-d041-33a5-5bab862dfe4d-export.json`](./inv-b6b57556-9484-d041-33a5-5bab862dfe4d-export.json) | `0daed60d…7e88` |
 
 ## Reproduce
 
 ```bash
 API_URL=https://insightiq-production-be0e.up.railway.app \
+  node scripts/export-investigation.mjs --list
+
+API_URL=https://insightiq-production-be0e.up.railway.app \
   node scripts/export-investigation.mjs \
-  --alertId=b82a676d-5e80-f884-0f1a-78a4b44f9b07 \
+  --alertId=<UUID> \
   --out=./evidence/unseen
 ```
 
