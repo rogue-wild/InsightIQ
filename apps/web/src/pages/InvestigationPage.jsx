@@ -113,6 +113,9 @@ export default function InvestigationPage() {
             </h1>
             <StatusPill status={alert.severity}>{alert.severity}</StatusPill>
             <StatusPill status={data.status}>{data.status}</StatusPill>
+            {seasonality?.status === 'ruled_out_as_seasonality' ? (
+              <StatusPill status="info">seasonality — not an incident</StatusPill>
+            ) : null}
           </div>
           <p className="inv-window mono muted">{formatAlertViewWindow(alert, view)}</p>
           <p

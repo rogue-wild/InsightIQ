@@ -128,15 +128,24 @@ export async function runInvestigation(client, req) {
   if (live && metric === 'revenue' && live.expected > 0 && baseline.revenue === 0) {
     baseline = { ...baseline, revenue: live.expected }
   }
-  const flatStart = new Date(windowStart.getTime() - 24 * 3600 * 1000)
-  const flatEnd = new Date(windowEnd.getTime() - 24 * 3600 * 1000)
+  // Naive trap baseline: mean of the prior 7 consecutive days (same clock window).
+  // Mixes weekdays so normal weekend softness looks like a drop vs a flat average.
   let flat
   try {
-    flat = await querySnapshotMetrics(client, advertiserID, flatStart, flatEnd)
+    flat = await queryNaiveTrailingBaseline(client, advertiserID, windowStart, windowEnd, 7)
+    if (flat.requests === 0 && flat.revenue === 0) {
+      const flatStart = new Date(windowStart.getTime() - 24 * 3600 * 1000)
+      const flatEnd = new Date(windowEnd.getTime() - 24 * 3600 * 1000)
+      flat = await querySnapshotMetrics(client, advertiserID, flatStart, flatEnd)
+    }
   } catch {
     flat = emptyBag()
   }
-  mark('baseline', `metric_hourly_snapshot vs ${baselineKind} (+ flat prior-day check)`, t1)
+  mark(
+    'baseline',
+    `metric_hourly_snapshot vs ${baselineKind} (+ naive trailing-7d seasonality check)`,
+    t1,
+  )
 
   const t2 = Date.now()
   const decomp = decompose(baseline, observed)
@@ -159,12 +168,8 @@ export async function runInvestigation(client, req) {
   }
 
   const t4 = Date.now()
-  let pct
-  if (live && live.expected !== 0) {
-    pct = ((live.actual - live.expected) / Math.abs(live.expected)) * 100
-  } else {
-    pct = pctChange(metricValue(observed, metric), metricValue(baseline, metric))
-  }
+  // Like-for-like residual — never use alerts_live expected here (may be flat / non-DOW).
+  const pct = pctChange(metricValue(observed, metric), metricValue(baseline, metric))
   let direction = 'down'
   if (pct > 0) direction = 'up'
   if (!alertID) {
@@ -179,7 +184,7 @@ export async function runInvestigation(client, req) {
     windowStart: formatRFC3339(windowStart),
     windowEnd: formatRFC3339(windowEnd),
     baselineKind,
-    severity: severityFromZOrPct(live, Math.abs(pct)),
+    severity: severityFrom(Math.abs(pct)),
     ...(advertiserID ? { advertiserId: advertiserID } : {}),
   }
 
@@ -221,8 +226,17 @@ export async function runInvestigation(client, req) {
     hypotheses,
   }
   if (seasonality.status === 'ruled_out_as_seasonality') {
-    inv.alert.severity = 'low'
-    inv.diagnosis.text = `Seasonality trap: ${seasonality.detail} ${inv.diagnosis.text}`
+    // Pure seasonality plant: clear as not-an-incident, do not alarm.
+    inv.alert.severity = 'info'
+    inv.alert.pctChange = round1(seasonality.seasonalDeltaPct)
+    inv.alert.direction = seasonality.seasonalDeltaPct >= 0 ? 'up' : 'down'
+    inv.diagnosis = {
+      ...inv.diagnosis,
+      text: `Not an incident — ruled out as seasonality. ${seasonality.detail}`,
+    }
+  } else if (seasonality.status === 'residual_remains' && live) {
+    // Real residual: allow live z-score to inform severity banding.
+    inv.alert.severity = severityFromZOrPct(live, Math.abs(pct))
   }
   inv.evidence = buildEvidenceLock(inv)
   return inv
@@ -348,6 +362,7 @@ async function querySeasonalBaseline(client, advertiserID, windowStart, windowEn
   const dur = windowEnd.getTime() - windowStart.getTime()
   const sum = emptyBag()
   let n = 0
+  // Same clock window on the same weekday: -7, -14, -21, -28 days.
   for (let i = 1; i <= weeks; i++) {
     const ws = addUTCDays(day, -7 * i)
     const we = new Date(ws.getTime() + dur)
@@ -379,6 +394,28 @@ async function querySeasonalBaseline(client, advertiserID, windowStart, windowEn
     }
     throw new Error('no seasonal baseline rows in metric_hourly_snapshot')
   }
+  return scaleBag(sum, 1 / n)
+}
+
+/** Mean of the prior N consecutive days (same clock window) — mixes DOW on purpose. */
+async function queryNaiveTrailingBaseline(client, advertiserID, windowStart, windowEnd, days) {
+  const day = truncateUTCHour(windowStart)
+  const dur = windowEnd.getTime() - windowStart.getTime()
+  const sum = emptyBag()
+  let n = 0
+  for (let i = 1; i <= days; i++) {
+    const ws = addUTCDays(day, -i)
+    const we = new Date(ws.getTime() + dur)
+    const m = await querySnapshotMetrics(client, advertiserID, ws, we)
+    if (m.requests === 0 && m.revenue === 0) continue
+    sum.requests += m.requests
+    sum.fills += m.fills
+    sum.impressions += m.impressions
+    sum.clicks += m.clicks
+    sum.revenue += m.revenue
+    n++
+  }
+  if (n === 0) return emptyBag()
   return scaleBag(sum, 1 / n)
 }
 

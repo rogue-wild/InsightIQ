@@ -59,24 +59,27 @@ export function metricValue(m, metric) {
 }
 
 /**
- * Compare a naive flat prior-day window vs the seasonal baseline.
- * If the flat view looks anomalous but the seasonal residual is small,
+ * Compare a naive (non–day-of-week) baseline vs a like-for-like seasonal baseline
+ * (same weekday / same hour × trailing weeks).
+ *
+ * Always compute the residual from the seasonal bag — never trust a caller-supplied
+ * pct that may come from alerts_live / a flat expectation (that is what makes every
+ * weekend look like an anomaly).
+ *
+ * If the naive view looks anomalous but the seasonal residual is small,
  * mark as seasonality (not an incident).
  */
-export function evaluateSeasonality(metric, observed, seasonal, flat, seasonalPct) {
+export function evaluateSeasonality(metric, observed, seasonal, flat, _unusedSeasonalPct) {
   const obsV = metricValue(observed, metric)
   const flatPct = pctChange(obsV, metricValue(flat, metric))
-  let seasPct = seasonalPct
-  if (Math.abs(seasPct) < 0.05) {
-    seasPct = pctChange(obsV, metricValue(seasonal, metric))
-  }
+  const seasPct = pctChange(obsV, metricValue(seasonal, metric))
 
   if (Math.abs(flatPct) >= 5 && Math.abs(seasPct) < 3) {
     return {
       status: 'ruled_out_as_seasonality',
       flatDeltaPct: round1(flatPct),
       seasonalDeltaPct: round1(seasPct),
-      detail: `Vs a flat prior-day average this looked like ${formatSignedPct(round1(flatPct))}, but vs same-hour × 4 weeks residual is only ${formatSignedPct(round1(seasPct))} — consistent with seasonality, not a new incident.`,
+      detail: `Vs a naive trailing average (mixed weekdays) this looked like ${formatSignedPct(round1(flatPct))}, but vs same weekday/hour × 4 weeks residual is only ${formatSignedPct(round1(seasPct))} — consistent with daily/weekly seasonality, not a new incident.`,
     }
   }
   if (Math.abs(seasPct) >= 5) {
@@ -84,14 +87,14 @@ export function evaluateSeasonality(metric, observed, seasonal, flat, seasonalPc
       status: 'residual_remains',
       flatDeltaPct: round1(flatPct),
       seasonalDeltaPct: round1(seasPct),
-      detail: `Same-hour × 4-week seasonality applied (flat prior-day was ${formatSignedPct(round1(flatPct))}). Residual vs seasonal baseline is ${formatSignedPct(round1(seasPct))} — still anomalous.`,
+      detail: `Same weekday/hour × 4-week seasonality applied (naive trailing average was ${formatSignedPct(round1(flatPct))}). Residual vs like-for-like baseline is ${formatSignedPct(round1(seasPct))} — still anomalous.`,
     }
   }
   return {
     status: 'skipped',
     flatDeltaPct: round1(flatPct),
     seasonalDeltaPct: round1(seasPct),
-    detail: 'Movement within noise after seasonality adjustment.',
+    detail: 'Movement within noise after like-for-like seasonality adjustment.',
   }
 }
 
@@ -317,7 +320,7 @@ export function enrichRuledOutWithSeasonality(ruled, season) {
       break
     case 'residual_remains':
       out.push({
-        reason: 'Seasonality checked',
+        reason: 'Seasonality checked — residual remains',
         detail: season.detail,
       })
       break

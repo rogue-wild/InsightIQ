@@ -16,14 +16,14 @@ export default function SeasonalityPanel({ seasonality }) {
       </p>
       <div className="seasonality-stats mono">
         <span>
-          Flat prior-day:{' '}
+          Naive trailing 7d:{' '}
           <span className={seasonality.flatDeltaPct < 0 ? 'neg' : 'pos'}>
             {Number(seasonality.flatDeltaPct) > 0 ? '+' : ''}
             {Number(seasonality.flatDeltaPct).toFixed(1)}%
           </span>
         </span>
         <span>
-          vs same hour × 4w:{' '}
+          vs same weekday/hour × 4w:{' '}
           <span className={seasonality.seasonalDeltaPct < 0 ? 'neg' : 'pos'}>
             {Number(seasonality.seasonalDeltaPct) > 0 ? '+' : ''}
             {Number(seasonality.seasonalDeltaPct).toFixed(1)}%

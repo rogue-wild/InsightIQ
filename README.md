@@ -70,7 +70,8 @@ flowchart LR
 
 | Stage | Where it runs | Approach |
 |-------|---------------|----------|
-| Detect | ClickHouse | Same-hour × ~4-week seasonality baseline; noise-floored Z-score (`greatest(stddev, 0.05)`); `|z| > 3` |
+| Detect | ClickHouse | Same weekday/hour × ~4-week seasonality baseline; noise-floored Z-score (`greatest(stddev, 0.05)`); `|z| > 3` |
+| Seasonality trap | API RCA | Naive trailing-7d vs like-for-like residual; pure seasonality → ruled out (`info`), not alarmed |
 | Drill-down | ClickHouse (+ Node enrichment) | Multi-dim contribution on `alert_dimension_contributors`; snapshot ranking across geo/OS/format/content/tier/campaign |
 | Diagnosis | Node (deterministic) then Gemini | Engine builds text + citations from computed rows; LLM **only narrates** that JSON |
 | OSS integration | **Langfuse** (JP cloud) | OTEL spans on chat/investigate/narrate — see links below |

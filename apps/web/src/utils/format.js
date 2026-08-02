@@ -59,8 +59,8 @@ const BASELINE_KINDS = {
     hint: 'Compared to the average of the trailing 7 calendar days.',
   },
   same_hour_4w_seasonality: {
-    label: 'vs same hour, prior 4 weeks',
-    hint: 'Compared to the same hour-of-day over the previous 4 weeks (seasonality-aware).',
+    label: 'vs same weekday/hour, prior 4 weeks',
+    hint: 'Like-for-like: same hour-of-day on the same weekday over the previous 4 weeks. A flat average would flag every weekend; this baseline does not.',
   },
   daily_peak_hour: {
     label: 'daily peak hour',

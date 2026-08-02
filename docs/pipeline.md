@@ -146,7 +146,7 @@ avg(value) OVER (
 ) AS expected
 ```
 
-Product investigations also compare against this same-hour × 4-week style residual (and a flat prior-day check) so seasonality can be ruled out when appropriate.
+Product investigations compare the observed window against a **like-for-like** baseline (same weekday/hour × prior 4 weeks) and a **naive trailing-7d average** (mixed weekdays). If the naive view looks anomalous but the seasonal residual is small, the movement is **ruled out as seasonality** (severity `info`) — including planted weekend/hour-of-day traps that a flat global average would alarm on.
 
 ### B. Noise-floored Z-score
 

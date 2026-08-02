@@ -247,7 +247,8 @@ select {
 .status-pill.ruled_out,
 .status-pill.ok,
 .status-pill.complete,
-.status-pill.low {
+.status-pill.low,
+.status-pill.info {
   color: var(--ok);
   background: var(--ok-dim);
   border-color: rgba(61, 184, 122, 0.35);
