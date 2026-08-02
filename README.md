@@ -86,6 +86,16 @@ flowchart LR
 
 Wiring: `apps/api/src/instrumentation.js`, `apps/api/.env.example` (`LANGFUSE_*`, host `https://jp.cloud.langfuse.com`).
 
+### Unseen / graded incident evidence
+
+| Evidence | Link |
+|----------|------|
+| Export bundle (diagnosis + numbers + trace + evidence hash) | [`evidence/unseen/inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07-export.json`](./evidence/unseen/inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07-export.json) |
+| Notes | [`evidence/unseen/README.md`](./evidence/unseen/README.md) |
+| Live investigation | https://insight-iq-woad.vercel.app/investigations/inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07 |
+
+Evidence hash: `37466a08f1e49bc1ea635bd2e1c62f749fa72f160c2e7f54ba06aac7a02b727c`
+
 ## How we built it
 
 - **ClickHouse Cloud** — primary datastore and analytical engine (ingest → MV rollup → baselines → alerts → RCA tables)
@@ -149,14 +159,14 @@ curl -s http://127.0.0.1:4000/health
 
 More: [docs/setup.md](./docs/setup.md) · deploy: [docs/deploy.md](./docs/deploy.md)
 
-### Export an investigation (unseen-incident ready)
+### Export an investigation
 
 ```bash
 node scripts/export-investigation.mjs --list
 node scripts/export-investigation.mjs --alertId=<UUID> --out=./evidence/unseen
 ```
 
-UI: Investigation → **Export**. Place graded outputs under [`evidence/unseen/`](./evidence/unseen/).
+UI: Investigation → **Export**. Graded bundle: [`evidence/unseen/`](./evidence/unseen/).
 
 ---
 
@@ -168,10 +178,10 @@ UI: Investigation → **Export**. Place graded outputs under [`evidence/unseen/`
 | README (hosted demo + runbook) | ✅ |
 | Architecture | ✅ [ARCHITECTURE.md](./ARCHITECTURE.md) |
 | Hosted demo | ✅ https://insight-iq-woad.vercel.app |
-| Langfuse wiring + evidence folder | ✅ code + CSV + session link in [`evidence/langfuse/`](./evidence/langfuse/) |
+| Langfuse wiring + evidence | ✅ session + CSV in [`evidence/langfuse/`](./evidence/langfuse/) |
+| Unseen incident bundle | ✅ [`evidence/unseen/`](./evidence/unseen/) |
+| Pitch deck PDF | ✅ [`pitch-deck.pdf`](./pitch-deck.pdf) |
 | Demo video (2–3 min) | ⬜ add link above |
-| Pitch deck PDF | ✅ [`pitch-deck.pdf`](./pitch-deck.pdf) (source: [`pitch-deck.md`](./pitch-deck.md)) |
-| Unseen incident bundle (diagnosis + numbers + trace) | ⬜ when dataset drops → [`evidence/unseen/`](./evidence/unseen/) |
 
 ## License
 

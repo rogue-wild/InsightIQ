@@ -1,37 +1,25 @@
-# Unseen incident bundle (mandatory)
+# Unseen / graded incident bundle — 404Duos
 
-When the Click-a-thon unseen dataset is released:
+System-generated export (not hand-written).
 
-1. Load it into your ClickHouse Cloud `insightiq` service (follow release notes).
-2. Refresh / recompute cascade tables if the release instructions require it (`alerts_live`, contributors, observations).
-3. Run the system — do **not** hand-write the diagnosis.
+## Bundle
 
-## Produce and commit
+| Field | Value |
+|-------|--------|
+| File | [`inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07-export.json`](./inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07-export.json) |
+| Alert | `b82a676d-5e80-f884-0f1a-78a4b44f9b07` |
+| Investigation | `inv-b82a676d-5e80-f884-0f1a-78a4b44f9b07` |
+| Evidence hash | `37466a08f1e49bc1ea635bd2e1c62f749fa72f160c2e7f54ba06aac7a02b727c` |
+
+Contains: diagnosis + citations, segments, ruled-out, seasonality, waterfall, counterfactual, hypotheses, immutable `trace[]`, evidence lock.
+
+## Reproduce
 
 ```bash
-# List alerts from the live API (or local)
-node scripts/export-investigation.mjs --list
-
-# Export the graded alert(s)
-node scripts/export-investigation.mjs --alertId=<UUID> --out=./evidence/unseen
+API_URL=https://insightiq-production-be0e.up.railway.app \
+  node scripts/export-investigation.mjs \
+  --alertId=b82a676d-5e80-f884-0f1a-78a4b44f9b07 \
+  --out=./evidence/unseen
 ```
 
-Also from the UI: Investigation → **Export**.
-
-### Required contents (per graded incident)
-
-| Artifact | File | Must include |
-|----------|------|----------------|
-| Diagnosis | Inside `*-export.json` → `investigation.diagnosis` | Plain language + named segments + citations |
-| Numbers | Same JSON + reproducible via CH / engine | actual, expected, z, deltas, contributions |
-| Trace | `investigation.trace` + `evidenceHash` | Ordered steps proving the system ran |
-| Langfuse | `../langfuse/` share link or JSON | Narration/chat turn for that incident |
-
-### Naming
-
-```
-evidence/unseen/<alertId>-export.json
-evidence/unseen/NOTES.md   # optional: which alert IDs were graded
-```
-
-**No trace → no credit** on this criterion.
+Or: hosted UI → Alerts → open alert → **Export**.
